@@ -4,9 +4,10 @@ import axios from 'axios';
 import { RadarChart, PolarGrid, PolarAngleAxis, ResponsiveContainer, Radar as RechartsRadar } from 'recharts';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth } from './firebase';
+import { subscribeWatchlist, addToWatchlist, removeFromWatchlist } from './watchlist';
 import './App.css';
 import AuthPage from './AuthPage';
-import { METHODOLOGY, InfoBtn, FootballField, ConsensusBar, MarketDataCard } from './components';
+import { METHODOLOGY, InfoBtn, FootballField, ConsensusBar, MarketDataCard, HeartButton, ProfileModal } from './components';
 
 const API = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
@@ -46,6 +47,11 @@ function App() {
   const [showFinancials, setShowFinancials] = useState(false);
   const [finTab, setFinTab] = useState('income');
 
+  // ── Watchlist / Profile State ─────────────────────────────────────────────
+  const [watchlist, setWatchlist] = useState([]);
+  const [showProfile, setShowProfile] = useState(false);
+  const [favBusy, setFavBusy] = useState(false);
+
   const [manualPeerTicker, setManualPeerTicker] = useState('');
   const [activePeers, setActivePeers] = useState([]);
   const [customPeersData, setCustomPeersData] = useState([]);
@@ -53,9 +59,45 @@ function App() {
   const [peerSearchLoading, setPeerSearchLoading] = useState(false);
   const [peerSearchOpen, setPeerSearchOpen] = useState(false);
 
+  // ── Watchlist live subscription ───────────────────────────────────────────
+  useEffect(() => {
+    if (!user || user.isGuest) { setWatchlist([]); return; }
+    const unsub = subscribeWatchlist(user.uid, setWatchlist);
+    return unsub;
+  }, [user]);
+
+  const isFavorited = useMemo(
+    () => !!(data && watchlist.some((w) => w.ticker === (data.symbol || '').toUpperCase())),
+    [data, watchlist]
+  );
+
+  const toggleFavorite = async () => {
+    if (!data || !user || user.isGuest || favBusy) return;
+    setFavBusy(true);
+    try {
+      if (isFavorited) {
+        await removeFromWatchlist(user.uid, data.symbol);
+      } else {
+        await addToWatchlist(user.uid, {
+          ticker: data.symbol,
+          name: data.name,
+          price: data.price,
+          verdict: data.verdict,
+          currency_symbol: data.currency_symbol,
+        });
+      }
+    } catch (_) {
+      alert('Could not update watchlist. Check your connection.');
+    }
+    setFavBusy(false);
+  };
+
   // ── Fetch Analysis ──────────────────────────────────────────────────────────
-  const fetchAnalysis = async () => {
-    if (!ticker) return;
+  const fetchAnalysis = async (tickerOverride) => {
+    const symbol = (typeof tickerOverride === 'string' ? tickerOverride : ticker).trim();
+    if (!symbol) return;
+    if (symbol !== ticker) setTicker(symbol);
+    setShowProfile(false);
     setLoading(true);
     setError('');
     setActiveModal(null);
@@ -72,7 +114,7 @@ function App() {
           headers['Authorization'] = `Bearer ${token}`;
         } catch (_) {}
       }
-      const response = await axios.get(`${API}/api/analyze/${ticker}`, { headers });
+      const response = await axios.get(`${API}/api/analyze/${symbol}`, { headers });
       setData(response.data);
       if (response.data.peers) setActivePeers(response.data.peers.map((p) => p.symbol));
     } catch (err) {
@@ -285,12 +327,22 @@ function App() {
       <div className={`search-container ${data ? 'search-top' : 'search-center'}`}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <h1 className="brand-title">SAMPADA<span style={{ color: '#00d4ff' }}>.ai</span></h1>
+          {data && (
+            <div className="ticker-chip">
+              <span className="ticker-chip-sym">{data.symbol}</span>
+              <span className="ticker-chip-name">{data.name}</span>
+              {user && !user.isGuest && (
+                <HeartButton active={isFavorited} busy={favBusy} onClick={toggleFavorite} />
+              )}
+            </div>
+          )}
           {user && (
             <button
-              onClick={() => { signOut(auth).then(() => { setUser(null); setData(null); }); }}
-              style={{ background: 'none', border: '1px solid #1a2a3a', borderRadius: '6px', color: '#446', fontSize: '0.65rem', padding: '4px 10px', cursor: 'pointer', letterSpacing: '1px' }}
+              className="profile-btn"
+              onClick={() => setShowProfile(true)}
+              title="Profile & Watchlist"
             >
-              SIGN OUT
+              <span className="profile-avatar">{(user.email || 'U').charAt(0).toUpperCase()}</span>
             </button>
           )}
         </div>
@@ -363,9 +415,9 @@ function App() {
           {/* Quality Scorecard */}
           <div className="card">
             <span className="card-label">QUALITY SCORECARD</span>
-            <div style={{ width: '100%', height: '200px', marginTop: '10px' }}>
+            <div className="scorecard-chart">
               <ResponsiveContainer width="100%" height="100%">
-                <RadarChart cx="50%" cy="50%" outerRadius="70%" data={data.quality_scores}>
+                <RadarChart cx="50%" cy="50%" outerRadius="65%" data={data.quality_scores}>
                   <PolarGrid stroke="#333" />
                   <PolarAngleAxis dataKey="subject" tick={{ fill: '#888', fontSize: 9 }} />
                   <RechartsRadar name="Score" dataKey="A" stroke="#00d4ff" strokeWidth={2} fill="#00d4ff" fillOpacity={0.2} />
@@ -375,9 +427,9 @@ function App() {
           </div>
 
           {/* Modeled Value */}
-          <div className="card" onClick={() => setActiveModal('methods')}>
+          <div className="card card-centered" onClick={() => setActiveModal('methods')}>
             <span className="card-label">MODELED VALUE</span>
-            <div style={{ textAlign: 'center' }}>
+            <div className="modeled-inner" style={{ textAlign: 'center' }}>
               <div style={{ fontSize: '3rem', fontFamily: 'JetBrains Mono', fontWeight: 'bold', letterSpacing: '-2px' }}>
                 <span style={{ fontSize: '1.5rem', color: '#444', marginRight: '5px', verticalAlign: 'middle' }}>{data.currency_symbol}</span>
                 {impliedValuation.finalPrice}
@@ -632,14 +684,21 @@ function App() {
                   )}
                 </div>
                 <h3 style={{ marginTop: 0, color: '#fff', fontSize: '1rem', marginBottom: '20px' }}>LIVE NEWS WIRE</h3>
-                {(data.headlines || []).length > 0
-                  ? (data.headlines || []).map((h, i) => (
-                      <div key={i} style={{ padding: '20px', background: '#111', marginBottom: '15px', borderRadius: '10px', border: '1px solid #222' }}>
-                        <a href={h.link} target="_blank" rel="noreferrer" style={{ color: 'white', textDecoration: 'none', fontSize: '1rem', lineHeight: '1.4', display: 'block', marginBottom: '10px', fontWeight: 'bold' }}>{h.title}</a>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#666' }}><span>{h.publisher}</span></div>
-                      </div>
-                    ))
-                  : <div style={{ color: '#666', fontStyle: 'italic' }}>No recent news found.</div>}
+                {data.sentiment_analysis?.fallback === 'sector' && (data.headlines || []).length > 0 && (
+                  <div className="news-fallback-note">
+                    No company-specific coverage found — showing broader {data.industry || data.sector || 'sector'} news.
+                  </div>
+                )}
+                <div className="news-wire">
+                  {(data.headlines || []).length > 0
+                    ? (data.headlines || []).map((h, i) => (
+                        <div key={i} className="news-item">
+                          <a href={h.link} target="_blank" rel="noreferrer" className="news-headline">{h.title}</a>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#666' }}><span>{h.publisher}</span></div>
+                        </div>
+                      ))
+                    : <div style={{ color: '#666', fontStyle: 'italic' }}>No recent news found.</div>}
+                </div>
               </div>
             )}
 
@@ -698,7 +757,7 @@ function App() {
                     )}
                   </div>
                 </div>
-                <div style={{ maxHeight: '50vh', overflowY: 'auto' }}>
+                <div className="comps-scroll">
                   <table className="comps-table">
                     <thead>
                       <tr>
@@ -814,6 +873,18 @@ function App() {
         </div>
       )}
 
+      {/* ── PROFILE MODAL ────────────────────────────────────────────────────── */}
+      {showProfile && (
+        <ProfileModal
+          user={user}
+          watchlist={watchlist}
+          onClose={() => setShowProfile(false)}
+          onSelect={(sym) => fetchAnalysis(sym)}
+          onRemove={(sym) => user && !user.isGuest && removeFromWatchlist(user.uid, sym)}
+          onSignOut={() => { signOut(auth).then(() => { setUser(null); setData(null); setShowProfile(false); }); }}
+        />
+      )}
+
       <div className="footer-bar" style={{ color: '#888', fontSize: '0.75rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
         ⚠️ EDUCATIONAL USE ONLY — This tool is a valuation simulation and does not constitute financial advice.
       </div>
@@ -841,7 +912,6 @@ function FinTable({ rows, data, isMargin }) {
                 <td style={{ color: isMargin && isMargin(k) ? '#00d4ff' : '#aaa', fontSize: '0.78rem' }}>{k}</td>
                 {data.map((y, i) => {
                   const val = y[k] || '-';
-                  const isGood = val !== '-' && (isMargin && isMargin(k) ? false : true);
                   return (
                     <td key={i} style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.82rem', color: isMargin && isMargin(k) ? '#88ccff' : '#fff' }}>
                       {val}

@@ -332,39 +332,124 @@ def analyze_headline_institutional(headline):
     }
 
 
-def fetch_google_news_institutional(company_name, country_name):
-    geo_map = {
-        "India": ("en-IN", "IN"), "UK": ("en-GB", "GB"), "Europe": ("en-GB", "GB"),
-        "Japan": ("ja-JP", "JP"), "Hong Kong": ("en-HK", "HK"), "China": ("en-CN", "CN"),
-        "Canada": ("en-CA", "CA"), "Australia": ("en-AU", "AU"),
-    }
-    hl, gl = geo_map.get(country_name, ("en-US", "US"))
-    q = f"{company_name} stock finance"
+_GEO_MAP = {
+    "India": ("en-IN", "IN"), "UK": ("en-GB", "GB"), "Europe": ("en-GB", "GB"),
+    "Japan": ("ja-JP", "JP"), "Hong Kong": ("en-HK", "HK"), "China": ("en-CN", "CN"),
+    "Canada": ("en-CA", "CA"), "Australia": ("en-AU", "AU"), "USA": ("en-US", "US"),
+}
+
+
+def _normalize_yf_news(yf_news):
+    """
+    Normalise yfinance .news into the flat schema the analyzer expects.
+    Handles BOTH the legacy flat format (title/link/providerPublishTime)
+    and the newer nested {'content': {...}} format introduced in yfinance 0.2.40+.
+    """
+    out = []
+    for item in (yf_news or []):
+        if not isinstance(item, dict):
+            continue
+        # New nested format
+        content = item.get('content')
+        if isinstance(content, dict):
+            title = content.get('title', '')
+            # link can live in several places
+            link = ''
+            cu = content.get('canonicalUrl') or content.get('clickThroughUrl') or {}
+            if isinstance(cu, dict):
+                link = cu.get('url', '')
+            provider = (content.get('provider') or {})
+            publisher = provider.get('displayName', 'Yahoo Finance') if isinstance(provider, dict) else 'Yahoo Finance'
+            pub = content.get('pubDate') or content.get('displayTime') or ''
+            out.append({
+                "title": title, "link": link, "publisher": publisher,
+                "providerPublishTime": pub,
+            })
+        else:
+            # Legacy flat format
+            out.append({
+                "title": item.get('title', ''),
+                "link": item.get('link', ''),
+                "publisher": item.get('publisher', 'Yahoo Finance'),
+                "providerPublishTime": item.get('providerPublishTime', ''),
+            })
+    return [h for h in out if h.get('title')]
+
+
+def _fetch_rss(url, default_publisher="Google News", limit=12):
+    """Generic, defensive RSS/XML fetcher. Returns a list of flat headline dicts."""
+    def _fetch():
+        r = requests.get(url, headers=_rand_ua(), timeout=8)
+        # lxml-xml first; fall back to html parser if the feed is malformed
+        try:
+            soup = BeautifulSoup(r.content, "xml")
+        except Exception:
+            soup = BeautifulSoup(r.content, "html.parser")
+        items = soup.find_all("item") or soup.find_all("entry")
+        results = []
+        for item in items[:limit]:
+            title_el = item.find("title")
+            title = title_el.get_text(strip=True) if title_el else ""
+            if not title:
+                continue
+            # link: <link>text</link> OR <link href="..."/> (Atom)
+            link_el = item.find("link")
+            link = ""
+            if link_el is not None:
+                link = link_el.get_text(strip=True) or link_el.get("href", "")
+            src_el = item.find("source")
+            publisher = src_el.get_text(strip=True) if (src_el and src_el.get_text(strip=True)) else default_publisher
+            date_el = item.find("pubDate") or item.find("published") or item.find("updated")
+            pub = date_el.get_text(strip=True) if date_el else ""
+            results.append({
+                "title": title, "link": link,
+                "publisher": publisher, "providerPublishTime": pub,
+            })
+        return results
+
+    return _with_retry(_fetch, retries=2, base_delay=1.0) or []
+
+
+def fetch_google_news(query, country_name="USA", limit=12):
+    """Google News RSS with a broadened, finance-weighted query."""
+    hl, gl = _GEO_MAP.get(country_name, ("en-US", "US"))
+    q = f"{query} stock OR shares OR earnings OR finance"
     url = (
         f"https://news.google.com/rss/search?q={urllib.parse.quote(q)}"
         f"&hl={hl}&gl={gl}&ceid={gl}:{hl.split('-')[0]}"
     )
+    return _fetch_rss(url, default_publisher="Google News", limit=limit)
 
-    def _fetch():
-        r = requests.get(url, headers=_rand_ua(), timeout=8)
-        soup = BeautifulSoup(r.content, "xml")
-        return [
-            {
-                "title": item.title.text if item.title else "",
-                "link": item.link.text if item.link else "",
-                "publisher": item.source.text if item.source else "Google News",
-                "providerPublishTime": item.pubDate.text if item.pubDate else "",
-            }
-            for item in soup.findAll("item")[:10]
-        ]
 
-    return _with_retry(_fetch, retries=3, base_delay=1.0) or []
+def fetch_yahoo_rss(ticker, limit=12):
+    """Yahoo Finance per-ticker RSS feed."""
+    url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={urllib.parse.quote(ticker)}&region=US&lang=en-US"
+    return _fetch_rss(url, default_publisher="Yahoo Finance", limit=limit)
+
+
+def fetch_sector_news(sector, industry, country_name="USA", limit=8):
+    """Final fallback: broad sector/industry macro news so the UI is never empty."""
+    topic = industry or sector or "stock market"
+    return fetch_google_news(f"{topic} sector", country_name, limit=limit)
+
+
+# Backwards-compatible alias (older callers / tests)
+def fetch_google_news_institutional(company_name, country_name):
+    return fetch_google_news(company_name, country_name)
 
 
 def get_smart_news(ticker, info=None, is_us=False):
-    raw_headlines = []
+    """
+    Resilient, multi-tier news pipeline. Tiers run until we have enough
+    headlines; the UI never ends up empty thanks to a sector-macro fallback.
+        Tier 1  yfinance structured news (normalised for new + legacy schema)
+        Tier 2  Finviz scrape (US)
+        Tier 3  Yahoo RSS + Google News RSS (broadened query)
+        Tier 4  Sector / industry macro news
+    """
     company_name = ticker
     country = "USA"
+    sector = industry = None
     if info:
         company_name = (
             info.get('shortName') or info.get('longName') or ticker
@@ -372,42 +457,68 @@ def get_smart_news(ticker, info=None, is_us=False):
         currency = info.get('currency', 'USD')
         if currency in GLOBAL_MACRO:
             country = GLOBAL_MACRO[currency].get('country', 'USA')
-    if not is_us:
-        raw_headlines = fetch_google_news_institutional(company_name, country)
-        if not raw_headlines:
-            try:
-                yf_n = _with_retry(lambda: yf.Ticker(ticker).news)
-                if yf_n:
-                    raw_headlines.extend(yf_n)
-            except Exception:
-                pass
-    else:
+        sector = info.get('sector')
+        industry = info.get('industry')
+
+    raw_headlines = []
+
+    def _need_more(n=6):
+        return len(raw_headlines) < n
+
+    # ── Tier 1: yfinance structured news ──────────────────────────────────────
+    try:
+        yf_n = _with_retry(lambda: yf.Ticker(ticker).news, retries=2)
+        raw_headlines.extend(_normalize_yf_news(yf_n))
+    except Exception:
+        pass
+
+    # ── Tier 2: Finviz scrape (US listings only) ──────────────────────────────
+    if is_us and _need_more():
         try:
             _, f_news = FinvizService.get_stock_data(ticker)
             if f_news:
                 raw_headlines.extend(f_news)
         except Exception:
             pass
-        if len(raw_headlines) < 5:
-            try:
-                yf_n = _with_retry(lambda: yf.Ticker(ticker).news)
-                if yf_n:
-                    raw_headlines.extend(yf_n)
-            except Exception:
-                pass
-        if len(raw_headlines) < 3:
-            raw_headlines.extend(fetch_google_news_institutional(company_name, "USA"))
+
+    # ── Tier 3: Yahoo RSS + Google News RSS (broadened) ───────────────────────
+    if _need_more():
+        try:
+            raw_headlines.extend(fetch_yahoo_rss(ticker))
+        except Exception:
+            pass
+    if _need_more():
+        try:
+            raw_headlines.extend(fetch_google_news(company_name, country))
+        except Exception:
+            pass
+
+    # ── Tier 4: Sector / industry macro fallback (never leave UI empty) ───────
+    sector_fallback_used = False
+    if _need_more(3):
+        try:
+            sec = fetch_sector_news(sector, industry, country)
+            if sec:
+                sector_fallback_used = True
+                raw_headlines.extend(sec)
+        except Exception:
+            pass
 
     processed, seen = [], set()
     for h in raw_headlines:
-        key = h.get('link') or h.get('title', '')
+        if not h or not h.get('title'):
+            continue
+        key = (h.get('link') or '').strip() or h.get('title', '').strip().lower()
         if key in seen:
             continue
         seen.add(key)
         processed.append(analyze_headline_institutional(h))
 
     if not processed:
-        return {"score": 50, "short_term": 50, "medium_term": 50, "event_risk": "Low"}, []
+        return {
+            "score": 50, "short_term": 50, "medium_term": 50,
+            "event_risk": "Low", "fallback": "none",
+        }, []
 
     processed.sort(key=lambda x: x['timestamp'], reverse=True)
     short_score = sum(x['impact_score'] for x in processed[:5]) / min(len(processed), 5)
@@ -424,6 +535,7 @@ def get_smart_news(ticker, info=None, is_us=False):
         "short_term": norm(short_score),
         "medium_term": norm(med_score),
         "event_risk": event_risk,
+        "fallback": "sector" if sector_fallback_used else "direct",
     }, processed[:8]
 
 

@@ -1,6 +1,99 @@
 /* src/components.js */
 import React from 'react';
 
+// ─── Heart (favorite) toggle ──────────────────────────────────────────────────
+export const HeartButton = ({ active, busy, onClick }) => (
+    <button
+        className={`heart-btn ${active ? 'active' : ''}`}
+        onClick={(e) => { e.stopPropagation(); onClick && onClick(); }}
+        disabled={busy}
+        title={active ? 'Remove from watchlist' : 'Add to watchlist'}
+        aria-pressed={active}
+    >
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path
+                d="M12 21s-7.5-4.7-10-9.3C.4 8.5 1.8 5 5.2 5c2 0 3.3 1.1 4 2.2.7-1.1 2-2.2 4-2.2 3.4 0 4.8 3.5 3.2 6.7C19.5 16.3 12 21 12 21z"
+                fill={active ? '#ff3b6b' : 'none'}
+                stroke={active ? '#ff3b6b' : '#8899aa'}
+                strokeWidth="1.8"
+                strokeLinejoin="round"
+            />
+        </svg>
+    </button>
+);
+
+// ─── Profile & Watchlist modal ────────────────────────────────────────────────
+export const ProfileModal = ({ user, watchlist, onClose, onSelect, onRemove, onSignOut }) => {
+    const email = user?.email || 'Guest user';
+    const initial = (email || 'U').charAt(0).toUpperCase();
+    const verdictColor = (v) =>
+        v?.includes('POSITIVE') ? '#00e576' : v?.includes('NEGATIVE') ? '#ff4444' : '#ffa500';
+
+    return (
+        <div className="modal-overlay" onClick={onClose}>
+            <div className="modal-content profile-modal" onClick={(e) => e.stopPropagation()}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+                    <h2 style={{ margin: 0, color: '#00d4ff', fontSize: '1.2rem', letterSpacing: '1px' }}>PROFILE</h2>
+                    <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#666', fontSize: '1.5rem', cursor: 'pointer' }}>✕</button>
+                </div>
+
+                {/* Identity */}
+                <div className="profile-identity">
+                    <div className="profile-avatar-lg">{initial}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ color: '#fff', fontSize: '1rem', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis' }}>{email}</div>
+                        <div style={{ color: '#556', fontSize: '0.72rem', marginTop: '2px' }}>
+                            {watchlist?.length || 0} stock{(watchlist?.length || 0) === 1 ? '' : 's'} on watchlist
+                        </div>
+                    </div>
+                    <button className="signout-btn" onClick={onSignOut}>SIGN OUT</button>
+                </div>
+
+                {/* Watchlist */}
+                <div style={{ marginTop: '28px' }}>
+                    <div style={{ fontSize: '0.7rem', color: '#667', fontWeight: 700, letterSpacing: '1.5px', marginBottom: '14px' }}>
+                        ★ WATCHLIST
+                    </div>
+
+                    {(!watchlist || watchlist.length === 0) ? (
+                        <div style={{ color: '#445', fontStyle: 'italic', fontSize: '0.85rem', padding: '30px 0', textAlign: 'center' }}>
+                            No saved stocks yet. Tap the ♥ next to a ticker to add it here.
+                        </div>
+                    ) : (
+                        <div className="watchlist-grid">
+                            {watchlist.map((w) => (
+                                <div key={w.ticker} className="watch-card" onClick={() => onSelect && onSelect(w.ticker)}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                        <div style={{ minWidth: 0 }}>
+                                            <div className="watch-sym">{w.ticker}</div>
+                                            <div className="watch-name">{w.name}</div>
+                                        </div>
+                                        <button
+                                            className="watch-remove"
+                                            title="Remove"
+                                            onClick={(e) => { e.stopPropagation(); onRemove && onRemove(w.ticker); }}
+                                        >✕</button>
+                                    </div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
+                                        <span style={{ fontFamily: 'JetBrains Mono, monospace', color: '#cdd', fontSize: '0.85rem' }}>
+                                            {w.price != null ? `${w.currency_symbol || ''}${w.price}` : '—'}
+                                        </span>
+                                        {w.verdict && (
+                                            <span style={{ fontSize: '0.62rem', fontWeight: 700, color: verdictColor(w.verdict), letterSpacing: '0.5px' }}>
+                                                {w.verdict}
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
 export const METHODOLOGY = {
     dcf: { title: "Intrinsic Value (DCF)", text: "We run 3 parallel Monte Carlo simulations (Bear, Base, Bull) with 2,000 iterations total. Key inputs like WACC and Growth Rate are correlated to simulate business cycle volatility." },
     comps: { title: "Relative Value (Comps)", text: "Similarity-Weighted Harmonic Mean. Peers are weighted by their statistical similarity (Size, Margin, Growth) to the target. We filter outliers using IQR logic." },
