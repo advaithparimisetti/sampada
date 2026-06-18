@@ -93,6 +93,11 @@ def _startup():
 # DIAGNOSTIC ENDPOINT
 # ---------------------------------------------------------------------------
 
+@app.get("/")
+def health_check():
+    return {"status": "ok", "app": "SAMPADA.ai"}
+
+
 @app.get("/api/diagnostics")
 def diagnostics():
     return {
