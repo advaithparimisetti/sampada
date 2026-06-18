@@ -1,0 +1,23 @@
+# Python
+backend/venv/
+backend/__pycache__/
+backend/*.pyc
+backend/.env
+*.pyo
+
+# Node
+frontend/node_modules/
+frontend/build/
+frontend/.env.local
+frontend/.env.production.local
+frontend/.env.development.local
+
+# Secrets / credentials
+*.json
+!frontend/public/**/*.json
+sampada-*.json
+firebase-adminsdk*.json
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: sampada-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: ALLOWED_ORIGINS
+        sync: false   # set manually in Render dashboard after frontend deploys
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false   # paste the full JSON content here (see deploy guide below)
+      - key: ALPHA_VANTAGE_KEY
+        sync: false
