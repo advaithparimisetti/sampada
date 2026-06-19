@@ -97,6 +97,7 @@ The rules in [`firestore.rules`](../firestore.rules) do **not** deploy with the 
 | **Login works but watchlist writes fail** | Firestore rules not deployed, or domain not authorized. | Deploy `firestore.rules` (Step 4) and authorize the domain (Step 3.2). |
 | **Vercel build fails on an ESLint warning** | CRA treats warnings as errors when `CI=true` (Vercel sets this). | Fix the warning locally — run `CI=true npm run build` in `frontend/` before pushing. |
 | **First request after idle is slow (~30 s)** | Render free tier sleeps after 15 min of inactivity (cold start). | Upgrade to a paid instance to stay always-on, or accept the cold start. |
+| **`/api/analyze` returns 404 for valid tickers (intermittent)** | Yahoo rate-limits Render's shared datacenter IP, so yfinance `info` comes back empty. | Handled automatically: the backend retries yfinance then fails over to yahooquery. If it still 404s for everything, the IP is hard-blocked — redeploy (new IP), or move to a paid instance / dedicated data source. |
 
 ---
 

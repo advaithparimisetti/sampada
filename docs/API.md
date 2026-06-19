@@ -56,7 +56,7 @@ The primary endpoint. Runs the full valuation, peer, news, consensus, and financ
 **Headers (optional)**
 - `Authorization: Bearer <firebase-id-token>` — when present and valid, the analysis is saved to `users/{uid}/sessions`.
 
-**Errors** — `404` if the ticker is unknown or has no market data.
+**Errors** — `404` only if the ticker is unknown / has no market data from **either** yfinance (retried) **or** the yahooquery fallback. Transient Yahoo throttling no longer causes a 404.
 
 **Response `200` (abridged)**
 ```jsonc
@@ -182,7 +182,7 @@ Generates an 8-slide PowerPoint deck and streams it back as a `.pptx` file.
 
 ## Notes on data sources
 
-- **Quotes / fundamentals / financials** — yfinance (primary), yahooquery (secondary).
+- **Quotes / fundamentals / financials** — yfinance (primary, retried with backoff), yahooquery (automatic failover when Yahoo throttles the host IP).
 - **Peers** — Finviz screener (US), yahooquery, yfinance.
 - **Commodities** — yfinance futures (`CL=F`, `BZ=F`, `GC=F`, `NG=F`, `ALI=F`).
 - **Risk-free rate** — yfinance `^TNX`; Alpha Vantage fallback.

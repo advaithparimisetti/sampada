@@ -43,7 +43,7 @@ User ──▶ React SPA ──┬──▶ FastAPI  ──▶ yfinance / yahooq
 
 1. **Validate & resolve** the ticker (regex guard, dynamic resolution).
 2. **Cache check** — return immediately if a result younger than `CACHE_DURATION` (900 s) exists.
-3. **Fetch core data** — yfinance `info` + price; macro + commodities.
+3. **Fetch core data** — `_fetch_core_quote` retries yfinance `info` with backoff, then falls back to **yahooquery** (see §9) so a throttled Yahoo IP doesn't hard-404; plus macro + commodities.
 4. **DCF** — `run_institutional_dcf` (dual WACC, normalized FCF, 10-yr projection).
 5. **Peers** — `get_robust_peers` produces Category A/B candidate lists; each is normalized via `process_peer_data` and scored by `calculate_peer_distance`. Top 4 A + 2 B are kept.
 6. **Comps valuation** — similarity-weighted harmonic mean of P/E and EV/EBITDA.
@@ -184,10 +184,11 @@ The `recommendation_mean` (1.0 = Strong Buy … 5.0 = Strong Sell) drives the SV
 
 - **Caching** — 15-minute in-memory cache keyed by resolved ticker.
 - **Anti-rate-limit** — rotating user-agent pool + exponential backoff with jitter (`_with_retry`) on all external calls.
+- **Multi-source quote failover** — `_fetch_core_quote` retries yfinance `info` with backoff and, if Yahoo throttles the host IP (common on shared cloud egress like Render's free tier), falls back to **yahooquery** (`_yahooquery_info_fallback`) to assemble a yfinance-`info`-compatible dict. The analysis degrades gracefully (peers/financials may thin out) instead of returning a hard 404. The same anti-throttle reasoning is why the news pipeline spans four independent sources.
 - **CORS** — locked to `ALLOWED_ORIGINS`; not a wildcard.
 - **Input validation** — strict regex on all ticker/query inputs before they touch any data provider.
 - **Error hiding** — a global exception handler logs internally but returns a generic message; OpenAPI docs are disabled in production.
-- **Secrets** — the Firebase service account is provided as an env var (JSON string on Render), never committed. The root [`.gitignore`](../.gitignore) blocks credential files, `.env`, `venv/`, and `node_modules/`.
+- **Secrets** — the Firebase service account is an env var, never committed. It accepts **base64-encoded JSON** (recommended — immune to env-injector newline/quote mangling) or raw JSON, with `private_key` newline repair (`_parse_service_account`). The root [`.gitignore`](../.gitignore) blocks credential files, `.env`, `venv/`, and `node_modules/`.
 - **Firestore rules** — per-user lockdown (`request.auth.uid == userId`), default-deny everywhere else.
 
 ---
