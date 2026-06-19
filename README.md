@@ -1,6 +1,6 @@
-# SAMPADA.ai
+# SAMPADA
 
-**Institutional-Grade Equity Intelligence** — a full-stack equity research platform that turns a single ticker into a banker-grade valuation workspace: dual-engine valuation (DCF + comparables), peer benchmarking, sentiment-weighted news, analyst consensus, a live football field, and one-click PowerPoint export.
+**Institutional-Style Equity Intelligence** — a full-stack equity research platform that turns a single ticker into a banker-grade valuation workspace: dual-engine valuation (DCF + comparables), peer benchmarking, sentiment-weighted news, analyst consensus, a live football field, and one-click PowerPoint export.
 
 > ⚠️ **Educational simulation only.** SAMPADA.ai produces computer-generated analytical estimates for learning purposes. It is **not** investment advice, a recommendation, or an offer to buy or sell securities.
 
