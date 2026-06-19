@@ -167,6 +167,101 @@ def _generate_theses(info, dcf_upside, sentiment_data):
     return {"bull": " ".join(bull), "bear": " ".join(bear)}
 
 
+def _yahooquery_info_fallback(ticker: str) -> dict:
+    """
+    Build a yfinance-`info`-compatible dict from yahooquery when yfinance is being
+    rate-limited (Yahoo throttles shared datacenter IPs like Render's). Returns {}
+    if it also can't get a price. Downstream code tolerates missing keys via _safe_float.
+    """
+    try:
+        from yahooquery import Ticker as YQ
+        yq = YQ(ticker)
+
+        def _mod(attr):
+            m = getattr(yq, attr, None)
+            if isinstance(m, dict) and ticker in m and isinstance(m[ticker], dict):
+                return m[ticker]
+            return {}
+
+        price = _mod("price")
+        sd = _mod("summary_detail")
+        ap = _mod("asset_profile")
+        ks = _mod("key_stats")
+        fd = _mod("financial_data")
+
+        cur_price = (price.get("regularMarketPrice") or fd.get("currentPrice")
+                     or sd.get("previousClose"))
+        if not cur_price:
+            return {}
+
+        merged = {
+            "regularMarketPrice": cur_price,
+            "currentPrice": cur_price,
+            "currency": price.get("currency") or sd.get("currency") or "USD",
+            "shortName": price.get("shortName") or price.get("longName") or ticker,
+            "longName": price.get("longName") or price.get("shortName") or ticker,
+            "marketCap": price.get("marketCap") or sd.get("marketCap"),
+            "sector": ap.get("sector"),
+            "industry": ap.get("industry"),
+            "longBusinessSummary": ap.get("longBusinessSummary"),
+            "country": ap.get("country"), "city": ap.get("city"),
+            "website": ap.get("website"),
+            "fullTimeEmployees": ap.get("fullTimeEmployees"),
+            "trailingPE": sd.get("trailingPE"),
+            "beta": sd.get("beta") or ks.get("beta"),
+            "enterpriseToEbitda": ks.get("enterpriseToEbitda"),
+            "enterpriseToRevenue": ks.get("enterpriseToRevenue"),
+            "sharesOutstanding": ks.get("sharesOutstanding"),
+            "trailingEps": ks.get("trailingEps"),
+            "totalRevenue": fd.get("totalRevenue"),
+            "ebitda": fd.get("ebitda"),
+            "totalDebt": fd.get("totalDebt"),
+            "totalCash": fd.get("totalCash"),
+            "freeCashflow": fd.get("freeCashflow"),
+            "revenueGrowth": fd.get("revenueGrowth"),
+            "ebitdaMargins": fd.get("ebitdaMargins"),
+            "profitMargins": fd.get("profitMargins") or ks.get("profitMargins"),
+            "returnOnEquity": fd.get("returnOnEquity"),
+            "debtToEquity": fd.get("debtToEquity"),
+            "payoutRatio": sd.get("payoutRatio") or ks.get("payoutRatio"),
+            "capitalExpenditures": fd.get("capitalExpenditures"),
+            "targetMeanPrice": fd.get("targetMeanPrice"),
+            "recommendationKey": fd.get("recommendationKey"),
+            "recommendationMean": fd.get("recommendationMean"),
+            "fiftyTwoWeekLow": sd.get("fiftyTwoWeekLow"),
+            "fiftyTwoWeekHigh": sd.get("fiftyTwoWeekHigh"),
+        }
+        return {k: v for k, v in merged.items() if v is not None}
+    except Exception as e:
+        print(f"[fallback] yahooquery failed for {ticker}: {e}")
+        return {}
+
+
+def _fetch_core_quote(ticker: str):
+    """
+    Resilient core quote fetch. Retries yfinance (Yahoo throttling is often
+    transient), then falls back to yahooquery. Returns (stock, info) or raises 404.
+    """
+    info = {}
+    stock = yf.Ticker(ticker)
+    for attempt in range(3):
+        try:
+            info = stock.info or {}
+            if info and (info.get('regularMarketPrice') or info.get('currentPrice')):
+                return stock, info
+        except Exception:
+            pass
+        time.sleep(0.7 * (attempt + 1))  # backoff between throttled attempts
+
+    # Fallback: yahooquery (different code path, often succeeds when yfinance is blocked)
+    fallback = _yahooquery_info_fallback(ticker)
+    if fallback:
+        print(f"[analyze] {ticker}: served via yahooquery fallback (yfinance throttled)")
+        return stock, fallback
+
+    raise HTTPException(status_code=404, detail="Ticker not found or no market data available")
+
+
 @app.get("/api/analyze/{ticker}")
 def analyze_stock(ticker: str, authorization: Optional[str] = Header(default=None)):
     ticker = _validate_ticker(ticker)
@@ -178,14 +273,7 @@ def analyze_stock(ticker: str, authorization: Optional[str] = Header(default=Non
 
     is_us = "." not in ticker
 
-    try:
-        stock = yf.Ticker(ticker)
-        info = stock.info
-        price_check = info.get('regularMarketPrice') or info.get('currentPrice')
-        if not info or not price_check:
-            raise ValueError("No market data")
-    except Exception:
-        raise HTTPException(status_code=404, detail="Ticker not found or no market data available")
+    stock, info = _fetch_core_quote(ticker)
 
     price, currency = normalize_data(info)
     mkt_cap = info.get('marketCap')

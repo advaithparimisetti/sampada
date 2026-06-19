@@ -62,7 +62,16 @@ def _parse_service_account(raw: str):
         repaired = raw.replace("\r\n", "\n").replace("\n", "\\n")
         return _fix_private_key(json.loads(repaired))
     except Exception as e:
-        print(f"[Firebase] Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON: {e}")
+        # Safe diagnostic (no secret leaked): show shape so the user can debug.
+        first = raw[:1]
+        looks = ("json-object" if first == "{" else
+                 "json-array" if first == "[" else
+                 "path-like" if first in "/\\" or raw[:2].lower() == "c:" else
+                 "other")
+        print(f"[Firebase] Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON: {e} "
+              f"| len={len(raw)} first_char={first!r} shape={looks} "
+              f"| TIP: base64-encode the JSON file and paste that instead "
+              f"(`base64 -w0 service-account.json`).")
         return None
 
 
