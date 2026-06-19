@@ -24,8 +24,9 @@ export const HeartButton = ({ active, busy, onClick }) => (
 
 // ─── Profile & Watchlist modal ────────────────────────────────────────────────
 export const ProfileModal = ({ user, watchlist, onClose, onSelect, onRemove, onSignOut }) => {
-    const email = user?.email || 'Guest user';
-    const initial = (email || 'U').charAt(0).toUpperCase();
+    const isGuest = !!user?.isGuest;
+    const email = isGuest ? 'Guest session' : (user?.email || 'Guest user');
+    const initial = isGuest ? 'G' : (email || 'U').charAt(0).toUpperCase();
     const verdictColor = (v) =>
         v?.includes('POSITIVE') ? '#00e576' : v?.includes('NEGATIVE') ? '#ff4444' : '#ffa500';
 
@@ -43,10 +44,12 @@ export const ProfileModal = ({ user, watchlist, onClose, onSelect, onRemove, onS
                     <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ color: '#fff', fontSize: '1rem', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis' }}>{email}</div>
                         <div style={{ color: '#556', fontSize: '0.72rem', marginTop: '2px' }}>
-                            {watchlist?.length || 0} stock{(watchlist?.length || 0) === 1 ? '' : 's'} on watchlist
+                            {isGuest
+                                ? 'Browsing without an account'
+                                : `${watchlist?.length || 0} stock${(watchlist?.length || 0) === 1 ? '' : 's'} on watchlist`}
                         </div>
                     </div>
-                    <button className="signout-btn" onClick={onSignOut}>SIGN OUT</button>
+                    <button className="signout-btn" onClick={onSignOut}>{isGuest ? 'SIGN IN' : 'SIGN OUT'}</button>
                 </div>
 
                 {/* Watchlist */}
@@ -55,7 +58,16 @@ export const ProfileModal = ({ user, watchlist, onClose, onSelect, onRemove, onS
                         ★ WATCHLIST
                     </div>
 
-                    {(!watchlist || watchlist.length === 0) ? (
+                    {isGuest ? (
+                        <div style={{ textAlign: 'center', padding: '26px 16px', background: '#0d1622', border: '1px solid #18293a', borderRadius: '12px' }}>
+                            <div style={{ color: '#8aa', fontSize: '0.85rem', marginBottom: '14px' }}>
+                                The watchlist saves your stocks across sessions. Create a free account to unlock it.
+                            </div>
+                            <button className="signout-btn" style={{ borderColor: '#0a5', color: '#0d9' }} onClick={onSignOut}>
+                                SIGN IN / CREATE ACCOUNT
+                            </button>
+                        </div>
+                    ) : (!watchlist || watchlist.length === 0) ? (
                         <div style={{ color: '#445', fontStyle: 'italic', fontSize: '0.85rem', padding: '30px 0', textAlign: 'center' }}>
                             No saved stocks yet. Tap the ♥ next to a ticker to add it here.
                         </div>

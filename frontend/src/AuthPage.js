@@ -138,14 +138,21 @@ export default function AuthPage({ onAuth }) {
           </button>
         </form>
 
-        {!isFirebaseConfigured && (
-          <button
-            style={{ ...styles.submitBtn, marginTop: '10px', background: 'transparent', border: '1px solid #333', color: '#666' }}
-            onClick={() => onAuth({ uid: 'guest', email: 'guest@sampada.ai', isGuest: true })}
-          >
-            CONTINUE AS GUEST
-          </button>
-        )}
+        <div style={styles.divider}>
+          <span style={styles.dividerLine} />
+          <span style={styles.dividerText}>OR</span>
+          <span style={styles.dividerLine} />
+        </div>
+
+        <button
+          style={{ ...styles.submitBtn, marginTop: 0, background: 'transparent', border: '1px solid #1a2a3a', color: '#8aa', boxShadow: 'none' }}
+          onClick={() => onAuth({ uid: 'guest', email: 'guest@sampada.ai', isGuest: true })}
+        >
+          CONTINUE AS GUEST →
+        </button>
+        <p style={styles.guestNote}>
+          Full analysis, valuation & exports. Watchlist requires an account.
+        </p>
 
         <p style={styles.disclaimer}>
           For educational purposes only. Not financial advice.
@@ -286,6 +293,30 @@ const styles = {
   submitDisabled: {
     opacity: 0.5,
     cursor: 'not-allowed',
+  },
+  divider: {
+    display: 'flex',
+    alignItems: 'center',
+    width: '100%',
+    margin: '20px 0 16px',
+    gap: '12px',
+  },
+  dividerLine: {
+    flex: 1,
+    height: '1px',
+    background: '#1a2a3a',
+  },
+  dividerText: {
+    fontSize: '0.6rem',
+    color: '#445',
+    letterSpacing: '2px',
+  },
+  guestNote: {
+    marginTop: '10px',
+    fontSize: '0.65rem',
+    color: '#556',
+    textAlign: 'center',
+    letterSpacing: '0.3px',
   },
   disclaimer: {
     marginTop: '24px',
