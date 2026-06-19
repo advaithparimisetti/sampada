@@ -72,7 +72,7 @@ def add_institutional_footer(slide):
         # If python-pptx is not available, try to add an unformatted textbox, but silently return if impossible
         try:
             txBox = slide.shapes.add_textbox(0, 0, 0, 0)
-            txBox.text_frame.paragraphs[0].text = "CONFIDENTIAL | FOR EDUCATIONAL PURPOSES ONLY | SAMPADA.ai"
+            txBox.text_frame.paragraphs[0].text = "CONFIDENTIAL | FOR EDUCATIONAL PURPOSES ONLY | SAMPADA"
         except Exception:
             pass
         return
@@ -80,5 +80,5 @@ def add_institutional_footer(slide):
     left = Inches(0.5); top = Inches(7.2); width = Inches(9.0); height = Inches(0.3)
     txBox = slide.shapes.add_textbox(left, top, width, height)
     p = txBox.text_frame.paragraphs[0]
-    p.text = "CONFIDENTIAL | FOR EDUCATIONAL PURPOSES ONLY | SAMPADA.ai"
+    p.text = "CONFIDENTIAL | FOR EDUCATIONAL PURPOSES ONLY | SAMPADA"
     p.font.size = Pt(8); p.font.color.rgb = RGBColor(100, 100, 100); p.alignment = PP_ALIGN.CENTER

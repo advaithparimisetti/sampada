@@ -70,7 +70,7 @@ export default function AuthPage({ onAuth }) {
       <div style={styles.card}>
         {/* Brand */}
         <h1 style={styles.brand}>
-          SAMPADA<span style={{ color: '#00d4ff' }}>.ai</span>
+          SAMPA<span style={{ color: '#00d4ff' }}>DA</span>
         </h1>
         <p style={styles.tagline}>Institutional-Grade Equity Intelligence</p>
 

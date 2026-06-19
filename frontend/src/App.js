@@ -326,7 +326,7 @@ function App() {
       <div className="blob" />
       <div className={`search-container ${data ? 'search-top' : 'search-center'}`}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <h1 className="brand-title">SAMPADA<span style={{ color: '#00d4ff' }}>.ai</span></h1>
+          <h1 className="brand-title">SAMPA<span style={{ color: '#00d4ff' }}>DA</span></h1>
           {data && (
             <div className="ticker-chip">
               <span className="ticker-chip-sym">{data.symbol}</span>
@@ -765,7 +765,7 @@ function App() {
                 <div className="peers-header">
                   <div><div style={{ color: '#666', fontSize: '0.8rem' }}>SECTOR BENCHMARK</div><div style={{ fontSize: '1.2rem', color: '#fff', fontWeight: 'bold' }}>{data.name} vs. Peer Group</div></div>
                   <div style={{ position: 'relative', width: '240px' }}>
-                    <div className="input-wrapper" style={{ height: '40px' }}>
+                    <div className="input-wrapper" style={{ height: '40px', width: '100%' }}>
                       <input
                         className="search-input"
                         style={{ fontSize: '0.8rem', padding: '0 15px', background: '#222' }}

@@ -54,7 +54,7 @@ def _validate_ticker(raw: str) -> str:
 # ---------------------------------------------------------------------------
 # APP INIT & STARTUP
 # ---------------------------------------------------------------------------
-app = FastAPI(title="SAMPADA.ai API", version="2.1.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="SAMPADA API", version="2.1.0", docs_url=None, redoc_url=None)
 
 app.add_middleware(
     CORSMiddleware,
@@ -96,13 +96,13 @@ def _startup():
 
 @app.get("/")
 def health_check():
-    return {"status": "ok", "app": "SAMPADA.ai"}
+    return {"status": "ok", "app": "SAMPADA"}
 
 
 @app.get("/api/diagnostics")
 def diagnostics():
     return {
-        "app": "SAMPADA.ai",
+        "app": "SAMPADA",
         "version": "2.1.0",
         "firebase": _firebase_diag,
         "cache_entries": len(CACHE),
@@ -604,7 +604,7 @@ async def export_ppt(request: ExportRequest):
     def _footer(slide):
         _rect(slide, 0, 7.30, W, 0.20, DIMMER)
         _txt(slide,
-             f"CONFIDENTIAL  ·  SAMPADA.ai  ·  {time.strftime('%B %d, %Y')}  ·  FOR EDUCATIONAL PURPOSES ONLY",
+             f"CONFIDENTIAL  ·  SAMPADA  ·  {time.strftime('%B %d, %Y')}  ·  FOR EDUCATIONAL PURPOSES ONLY",
              0.3, 7.32, W - 0.6, 0.16,
              size=6.5, color=DIM, align=PP_ALIGN.CENTER)
 
@@ -638,7 +638,7 @@ async def export_ppt(request: ExportRequest):
 
     # Header band
     _rect(s1, 0.10, 0, W - 0.10, 1.05, PANEL)
-    _txt(s1, "SAMPADA.ai", 0.30, 0.10, 4.0, 0.40, size=11, bold=True, color=ACCENT)
+    _txt(s1, "SAMPADA", 0.30, 0.10, 4.0, 0.40, size=11, bold=True, color=ACCENT)
     _txt(s1, f"{'CLIENT PRESENTATION' if is_client else 'INTERNAL — STRICTLY PRIVATE & CONFIDENTIAL'}",
          0.30, 0.55, 7.0, 0.30, size=7.5, color=DIM)
     _txt(s1, time.strftime('%B %d, %Y'), 8.0, 0.55, 1.7, 0.30,
@@ -1009,7 +1009,7 @@ async def export_ppt(request: ExportRequest):
         _txt(s8, "Thank You", 0.30, 1.80, 9.0, 1.20, size=40, bold=True, color=WHITE, align=PP_ALIGN.CENTER)
         _txt(s8, f"For questions regarding this analysis, please contact your coverage team.",
              0.30, 3.20, 9.0, 0.50, size=10, color=DIM, align=PP_ALIGN.CENTER)
-        _txt(s8, "SAMPADA.ai  ·  Institutional Equity Research  ·  Educational Simulation Only",
+        _txt(s8, "SAMPADA  ·  Institutional Equity Research  ·  Educational Simulation Only",
              0.30, 4.00, 9.0, 0.34, size=8, color=DIMMER, align=PP_ALIGN.CENTER)
     else:
         _txt(s8, f"{request.ticker}  ·  WACC Bridge & Model Components  (INTERNAL)",
