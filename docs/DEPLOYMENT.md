@@ -27,8 +27,9 @@ The repo is safe to push: [`.gitignore`](../.gitignore) excludes `backend/.env`,
 
    | Key | Value |
    |-----|-------|
-   | `FIREBASE_SERVICE_ACCOUNT_JSON` | Paste the **entire contents** of your `sampada-…firebase-adminsdk-….json` file (the whole JSON object, on one line is fine). |
+   | `FIREBASE_SERVICE_ACCOUNT_JSON` | The service-account credentials. **Recommended:** base64-encode the JSON file and paste that — it avoids all newline/quote escaping issues (`base64 -w0 service-account.json`). Raw JSON also works; the loader repairs common escaping quirks. |
    | `ALLOWED_ORIGINS` | Your Vercel URL (filled in after Step 2), e.g. `https://sampada-xi.vercel.app`. |
+   | `HF_API_TOKEN` | Optional — a Hugging Face token activates FinBERT sentiment. Without it the app uses an enhanced-VADER fallback. |
    | `ALPHA_VANTAGE_KEY` | Optional — only for CPI inflation. |
 
 4. Deploy. Note your service URL (e.g. `https://sampada-xxxx.onrender.com`).
@@ -91,7 +92,8 @@ The rules in [`firestore.rules`](../firestore.rules) do **not** deploy with the 
 | **404 on `/api/analyze/...`** while the service is "live" | Render health check hitting `/` got a 404 and restarted the app in a loop. | Ensure `GET /` returns 200 (already implemented as a health-check route). Redeploy. |
 | **CORS error in the browser console** | Vercel origin not in `ALLOWED_ORIGINS`. | Add the exact origin (scheme + host, no trailing slash) on Render and redeploy. |
 | **Requests go to `localhost:8000` in production** | `REACT_APP_API_URL` not set, or set after the last build. | Set it in Vercel and **redeploy** (CRA env vars are baked in at build time). |
-| **`Firebase: No credentials found` in Render logs** | `FIREBASE_SERVICE_ACCOUNT_JSON` empty or malformed. | Paste the full JSON object (not a file path) into the env var. App still runs in guest mode without it. |
+| **`Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON`** | Render's env injector mangled the JSON's `private_key` newlines. | Base64-encode the file and paste that instead (`base64 -w0 service-account.json`); the loader auto-detects and decodes it. |
+| **`Firebase: No credentials found` in Render logs** | `FIREBASE_SERVICE_ACCOUNT_JSON` empty or malformed. | Paste the full JSON object or its base64 (not a file path). App still runs in guest mode without it. |
 | **Login works but watchlist writes fail** | Firestore rules not deployed, or domain not authorized. | Deploy `firestore.rules` (Step 4) and authorize the domain (Step 3.2). |
 | **Vercel build fails on an ESLint warning** | CRA treats warnings as errors when `CI=true` (Vercel sets this). | Fix the warning locally — run `CI=true npm run build` in `frontend/` before pushing. |
 | **First request after idle is slow (~30 s)** | Render free tier sleeps after 15 min of inactivity (cold start). | Upgrade to a paid instance to stay always-on, or accept the cold start. |

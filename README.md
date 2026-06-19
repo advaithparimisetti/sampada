@@ -23,10 +23,12 @@
 
 | Area | What it does |
 |------|--------------|
-| **Dual-engine valuation** | Institutional DCF (Blume-adjusted beta, dual base/stress WACC, 10-year projection, normalized FCF) blended 60/40 with a similarity-weighted harmonic-mean comparables model. |
-| **Smart peer engine** | Category A (same sector **and** industry) and Category B (same sector, scale benchmarks). Multi-source discovery (Finviz screener + yahooquery + yfinance) with cross-currency normalization and IQR outlier filtering. |
+| **Dual-engine valuation** | Institutional DCF (Blume-adjusted beta, dual base/stress WACC, 10-year projection) with **sector-adjusted FCF normalization** (3–7yr lookback by cyclicality, CAPEX smoothing, NWC normalization), **dynamically blended** with comparables via a Bayesian-inspired weighting (asset-light/predictable ⇒ DCF-heavy; cyclical/capital-intensive ⇒ Comps-heavy). |
+| **Formalized peer engine** | Rigid cascading selection: GICS sector+industry → revenue ±30% → market cap ±50% → ROIC/margin ranking, with documented relaxation tiers. The exact methodology used is surfaced in the UI. Category A (direct) / Category B (scale) split. |
+| **FinBERT NLP** | Financial-domain sentiment via `ProsusAI/finbert` (HF Inference API) that reads jargon and context, with an enhanced-VADER fallback. Batched and latency-bounded. |
+| **Model validation** | A backtesting module computing real MAPE, hit-ratio, and out/under-performance vs analyst consensus over the realized 12-month price path. |
 | **Valuation football field** | Visual range bars for 52-week, analyst targets, comps, and DCF, with a live current-price marker. |
-| **Resilient news pipeline** | Four-tier fallback (yfinance → Finviz → Yahoo/Google RSS → sector macro) with VADER sentiment + 3-day half-life time decay, so the wire is never empty. |
+| **Resilient news pipeline** | Four-tier fallback (yfinance → Finviz → Yahoo/Google RSS → sector macro) with FinBERT/VADER sentiment + 3-day half-life time decay, so the wire is never empty. |
 | **Analyst consensus** | Multi-source cascade producing a 1–5 `recommendationMean` gauge, buy/hold/sell counts, and mean/high/low price targets. |
 | **Macro & commodities** | Live WTI, Brent, Gold, Natural Gas (yfinance futures) + 10Y Treasury yield and CPI inflation. |
 | **Auth & watchlist** | Firebase Email/Password auth; per-user Cloud Firestore watchlist with a persistent ♥ toggle and a profile modal. |
@@ -149,6 +151,10 @@ The app opens at `http://localhost:3000` and proxies analysis calls to `http://l
 | `FIREBASE_SERVICE_ACCOUNT` | local | Path to the service-account `.json` file (local dev alternative). |
 | `ALLOWED_ORIGINS` | prod | Comma-separated CORS allowlist, e.g. `https://yourapp.vercel.app`. Defaults to localhost. |
 | `ALPHA_VANTAGE_KEY` | optional | Only used for the CPI inflation fallback. |
+| `HF_API_TOKEN` | optional | Hugging Face token to activate FinBERT sentiment via the Inference API. Without it, the NLP engine falls back to an enhanced VADER lexicon. |
+| `HF_TIMEOUT` | optional | FinBERT request timeout in seconds (default `8`). Bounds news-pipeline latency. |
+
+> `FIREBASE_SERVICE_ACCOUNT_JSON` accepts **either** raw JSON **or** base64-encoded JSON. On Render, base64 is recommended — it avoids the newline/quote-escaping issues that otherwise corrupt the service-account `private_key`.
 
 ### Frontend (`frontend/.env.local`)
 

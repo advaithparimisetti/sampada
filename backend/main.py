@@ -25,6 +25,7 @@ from analysis import (
     calculate_weighted_harmonic_mean, get_smart_news, get_financial_statements,
     get_historical_trading_range, get_analyst_consensus,
     calculate_quality_scores, generate_swot, calculate_confidence_score,
+    calculate_blend_weights, run_backtest,
     _safe_float,
 )
 from auth import run_startup_diagnostic, verify_token, save_session
@@ -217,8 +218,12 @@ def analyze_stock(ticker: str, authorization: Optional[str] = Header(default=Non
 
     # ── Peer Discovery (Category A + B) ──────────────────────────────────────
     peer_result = get_robust_peers(
-        ticker, info.get('sector'), info.get('industry'), mkt_cap, is_us
+        ticker, info.get('sector'), info.get('industry'), mkt_cap, is_us,
+        target_revenue=_safe_float(info.get('totalRevenue')),
+        target_roic=_safe_float(info.get('returnOnEquity')),
+        target_margin=_safe_float(info.get('ebitdaMargins')),
     )
+    peer_methodology = peer_result.get("methodology", {})
 
     all_processed = []
     for cat, tickers_list in [("A", peer_result.get("cat_a", [])),
@@ -252,7 +257,15 @@ def analyze_stock(ticker: str, authorization: Optional[str] = Header(default=Non
     elif avg_pe > 0 and info.get('trailingEps'):
         comps_price = avg_pe * info['trailingEps']
 
-    final_val = (dcf_data['val'] * 0.6 + comps_price * 0.4) if dcf_data['val'] > 0 else comps_price
+    # Dynamic, sector-aware DCF/Comps blend (replaces the fixed 60/40).
+    w_dcf, w_comps = calculate_blend_weights(info, info.get('sector'))
+    if dcf_data['val'] > 0 and comps_price > 0:
+        final_val = dcf_data['val'] * w_dcf + comps_price * w_comps
+    elif dcf_data['val'] > 0:
+        final_val = dcf_data['val']
+    else:
+        final_val = comps_price
+        w_dcf, w_comps = 0.0, 1.0
     upside = round(((final_val - price) / price) * 100, 2) if price else 0
 
     verdict = "NEUTRAL"
@@ -268,6 +281,11 @@ def analyze_stock(ticker: str, authorization: Optional[str] = Header(default=Non
     consensus = get_analyst_consensus(ticker, info, is_us)
     quality_scores = calculate_quality_scores(info, financials)
     swot = generate_swot(info, [])
+    backtest = run_backtest(
+        stock, final_val, price,
+        dcf_low=dcf_data.get('low'), dcf_high=dcf_data.get('high'),
+        consensus_target=consensus.get('target_mean'),
+    )
 
     football_field = {
         "fifty_two_week": [hist['low_52wk'], hist['high_52wk']] if hist else [price * 0.8, price * 1.2],
@@ -292,6 +310,7 @@ def analyze_stock(ticker: str, authorization: Optional[str] = Header(default=Non
         "confidence_score": calculate_confidence_score(final_peers, dcf_data['val'], info, sentiment_data['event_risk']),
         "headlines": headlines,
         "peers": final_peers,
+        "peer_methodology": peer_methodology,
         "summary": info.get('longBusinessSummary'),
         "sector": info.get('sector'),
         "industry": info.get('industry'),
@@ -317,10 +336,14 @@ def analyze_stock(ticker: str, authorization: Optional[str] = Header(default=Non
             "comps_price": round(comps_price, 2),
             "wacc": dcf_data.get('wacc', 0),
             "growth_assumed": dcf_data.get('growth', 0),
+            "fcf_lookback": dcf_data.get('fcf_lookback'),
+            "blend_dcf": round(w_dcf * 100),
+            "blend_comps": round(w_comps * 100),
         },
         "quality_scores": quality_scores,
         "swot": swot,
         "consensus": consensus,
+        "backtest": backtest,
         "football_field": football_field,
         "wacc_components": {
             "rf": macro["risk_free_rate"],

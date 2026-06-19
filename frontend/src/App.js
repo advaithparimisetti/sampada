@@ -439,7 +439,21 @@ function App() {
                   {impliedValuation.upside}% Spread
                 </div>
               </div>
-              <div style={{ marginTop: '25px' }}>
+              {(data.valuation_analysis?.blend_dcf != null) && (
+                <div className="blend-pill" title="Dynamic, sector-aware blend of intrinsic (DCF) and relative (Comps) valuation">
+                  BLEND · DCF {data.valuation_analysis.blend_dcf}% / COMPS {data.valuation_analysis.blend_comps}%
+                </div>
+              )}
+              {data.backtest?.data_available && (
+                <div style={{ marginTop: '12px', fontSize: '0.62rem', color: '#778', lineHeight: 1.5 }}>
+                  <span style={{ color: '#00d4ff' }}>VALIDATION</span> · Fair value sits {data.backtest.mape}% from the
+                  realized 12-mo price path
+                  {data.backtest.outperformance != null && (
+                    <> · {data.backtest.outperformance >= 0 ? 'beats' : 'trails'} street by {Math.abs(data.backtest.outperformance)}%</>
+                  )}
+                </div>
+              )}
+              <div style={{ marginTop: '18px' }}>
                 <button onClick={(e) => { e.stopPropagation(); setShowFinancials(true); setFinTab('income'); }} className="btn-fin">
                   TEAR SHEET
                 </button>
@@ -630,6 +644,42 @@ function App() {
                     </div>
                   </div>
                 </div>
+                {data.backtest?.data_available && (
+                  <div className="validation-card" style={{ marginBottom: '30px' }}>
+                    <div style={{ color: '#00d4ff', fontSize: '0.9rem', marginBottom: '14px', fontWeight: 'bold' }}>
+                      MODEL VALIDATION — HISTORICAL ACCURACY
+                    </div>
+                    <div className="validation-row">
+                      <div className="validation-metric">
+                        <div className="v-num" style={{ color: '#fff' }}>{data.backtest.mape}%</div>
+                        <div className="v-lbl">SAMPADA MAPE</div>
+                      </div>
+                      <div className="validation-metric">
+                        <div className="v-num" style={{ color: '#aaa' }}>{data.backtest.consensus_mape != null ? data.backtest.consensus_mape + '%' : '—'}</div>
+                        <div className="v-lbl">Street MAPE</div>
+                      </div>
+                      <div className="validation-metric">
+                        <div className="v-num" style={{ color: (data.backtest.outperformance ?? 0) >= 0 ? '#00e576' : '#ff6666' }}>
+                          {data.backtest.outperformance != null ? (data.backtest.outperformance >= 0 ? '+' : '') + data.backtest.outperformance + '%' : '—'}
+                        </div>
+                        <div className="v-lbl">vs Street</div>
+                      </div>
+                      <div className="validation-metric">
+                        <div className="v-num" style={{ color: '#aaa' }}>{data.backtest.hit_ratio != null ? data.backtest.hit_ratio + '%' : '—'}</div>
+                        <div className="v-lbl">Range Hit ({data.backtest.window_months}mo)</div>
+                      </div>
+                    </div>
+                    <div className="validation-note">
+                      {data.backtest.methodology}
+                    </div>
+                  </div>
+                )}
+                {data.valuation_analysis?.fcf_lookback && (
+                  <div style={{ fontSize: '0.72rem', color: '#778', marginBottom: '18px' }}>
+                    FCF normalized over a <b style={{ color: '#00d4ff' }}>{data.valuation_analysis.fcf_lookback}-year</b> window (sector-adjusted for cyclicality);
+                    blend dynamically weighted <b style={{ color: '#00d4ff' }}>{data.valuation_analysis.blend_dcf}% DCF / {data.valuation_analysis.blend_comps}% Comps</b>.
+                  </div>
+                )}
                 <h3 style={{ fontSize: '1.2rem', marginBottom: '15px', borderBottom: '1px solid #333', paddingBottom: '10px', marginTop: '30px', color: '#fff' }}>VALUATION MATRIX & METHODOLOGIES</h3>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '30px' }}>
                   {['dcf', 'wacc', 'growth', 'comps', 'range', 'blended'].map((key) => (
@@ -649,7 +699,14 @@ function App() {
               <div style={{ padding: '20px' }}>
                 {data.market_data && <MarketDataCard data={data.market_data} />}
                 <div style={{ marginBottom: '25px', padding: '20px', background: '#1a1a1a', borderRadius: '10px', borderLeft: '4px solid #00d4ff' }}>
-                  <h3 style={{ marginTop: 0, fontSize: '1rem', color: '#fff' }}>SENTIMENT HORIZON</h3>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h3 style={{ marginTop: 0, marginBottom: 0, fontSize: '1rem', color: '#fff' }}>SENTIMENT HORIZON</h3>
+                    {data.sentiment_analysis?.nlp_engine && (
+                      <span style={{ fontSize: '0.62rem', color: '#667', border: '1px solid #233', borderRadius: '20px', padding: '3px 10px' }}>
+                        NLP · {data.sentiment_analysis.nlp_engine}
+                      </span>
+                    )}
+                  </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '15px' }}>
                     {[['SHORT TERM (3D)', data.sentiment_analysis?.short_term], ['MEDIUM TERM (30D)', data.sentiment_analysis?.medium_term], ['EVENT RISK', data.sentiment_analysis?.event_risk]].map(([label, val]) => (
                       <div key={label} style={{ textAlign: 'center' }}>
@@ -705,7 +762,7 @@ function App() {
             {/* Peers Modal */}
             {activeModal === 'peers' && (
               <div>
-                <div style={{ marginBottom: '20px', padding: '20px', background: '#111', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className="peers-header">
                   <div><div style={{ color: '#666', fontSize: '0.8rem' }}>SECTOR BENCHMARK</div><div style={{ fontSize: '1.2rem', color: '#fff', fontWeight: 'bold' }}>{data.name} vs. Peer Group</div></div>
                   <div style={{ position: 'relative', width: '240px' }}>
                     <div className="input-wrapper" style={{ height: '40px' }}>
@@ -757,6 +814,16 @@ function App() {
                     )}
                   </div>
                 </div>
+                {data.peer_methodology?.tier_used && (
+                  <div className="peers-methodology" title={(data.peer_methodology.filters || []).join('  →  ')}>
+                    <span>⚙</span>
+                    <span>
+                      <b>Cohort methodology:</b> {data.peer_methodology.tier_used}
+                      {' · '}{data.peer_methodology.candidates_screened} candidates screened
+                      {' · '}cascade: {(data.peer_methodology.filters || []).join(' → ')}
+                    </span>
+                  </div>
+                )}
                 <div className="comps-scroll">
                   <table className="comps-table">
                     <thead>
@@ -813,11 +880,11 @@ function App() {
                         return (
                           <>
                             {catA.length > 0 && (
-                              <tr><td colSpan="11" style={{ padding: '4px 8px', background: '#001a2e', color: '#00d4ff', fontSize: '0.68rem', fontWeight: 'bold', letterSpacing: '0.08em' }}>▸ CATEGORY A — DIRECT SECTOR & INDUSTRY COMPARABLES</td></tr>
+                              <tr className="comps-cat-head"><td colSpan="11" style={{ background: '#001a2e', color: '#00d4ff', fontSize: '0.68rem', fontWeight: 'bold', letterSpacing: '0.08em' }}>▸ CATEGORY A — DIRECT SECTOR & INDUSTRY COMPARABLES</td></tr>
                             )}
                             {catA.map((p, i) => renderPeerRow(p, i))}
                             {catB.length > 0 && (
-                              <tr><td colSpan="11" style={{ padding: '4px 8px', background: '#1a1400', color: '#ffa500', fontSize: '0.68rem', fontWeight: 'bold', letterSpacing: '0.08em' }}>▸ CATEGORY B — SCALE BENCHMARKS (SAME SECTOR)</td></tr>
+                              <tr className="comps-cat-head"><td colSpan="11" style={{ background: '#1a1400', color: '#ffa500', fontSize: '0.68rem', fontWeight: 'bold', letterSpacing: '0.08em' }}>▸ CATEGORY B — SCALE BENCHMARKS (SAME SECTOR)</td></tr>
                             )}
                             {catB.map((p, i) => renderPeerRow(p, i + catA.length))}
                           </>

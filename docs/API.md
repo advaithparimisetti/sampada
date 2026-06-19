@@ -72,7 +72,8 @@ The primary endpoint. Runs the full valuation, peer, news, consensus, and financ
   "sentiment_analysis": {
     "score": 61.2, "short_term": 61.2, "medium_term": 55.0,
     "event_risk": "Medium",              // Low | Medium | High
-    "fallback": "direct"                 // direct | sector | none
+    "fallback": "direct",                // direct | sector | none
+    "nlp_engine": "FinBERT (HF Inference API)"  // or "VADER (lexicon fallback)"
   },
   "headlines": [
     { "title": "...", "link": "...", "publisher": "Reuters",
@@ -95,7 +96,21 @@ The primary endpoint. Runs the full valuation, peer, news, consensus, and financ
   "valuation_analysis": {
     "implied_price": 138.5, "upside": 15.1, "dcf_price": 142.0,
     "dcf_range": "110.0 - 175.0", "comps_price": 132.0,
-    "wacc": 0.095, "growth_assumed": 0.18
+    "wacc": 0.095, "growth_assumed": 0.18,
+    "fcf_lookback": 3,                   // sector-adjusted FCF window (years)
+    "blend_dcf": 77, "blend_comps": 23   // dynamic blend weights (%)
+  },
+  "peer_methodology": {
+    "filters": ["GICS Sector & Industry match", "Revenue band ±30% of target",
+                "Market cap ±50% of target", "ROIC & margin similarity (ranking)"],
+    "tier_used": "Sector+Industry, MktCap ±50%",
+    "candidates_screened": 14, "cat_a_count": 4, "cat_b_count": 2
+  },
+  "backtest": {
+    "data_available": true, "window_months": 13,
+    "mape": 8.4, "consensus_mape": 9.5, "outperformance": 1.1,
+    "hit_ratio": 61.5, "converged": true, "actual_return": 22.0,
+    "methodology": "Proximity of fair value to realized 12-month monthly close path …"
   },
   "football_field": {
     "fifty_two_week": [80.0, 140.0], "analyst_target": [100.0, 200.0],

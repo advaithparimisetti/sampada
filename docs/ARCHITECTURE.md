@@ -60,7 +60,7 @@ User ──▶ React SPA ──┬──▶ FastAPI  ──▶ yfinance / yahooq
 - **Beta** — Blume-adjusted (`0.67·raw + 0.33·1.0`), capped per scenario.
 - **WACC** — computed twice: a conservative **base** and a **stress** case. Cost of equity via CAPM (`rf + β·ERP`); cost of debt from interest expense / total debt (floored/capped); weighted by market cap vs. debt. Bounded to sane ranges.
 - **Growth** — ROIC-derived (`ROE·(1−payout)`), bounded 5–25%, fading to a terminal rate.
-- **FCF** — normalized across up to 3 years of revenue-margin history to dampen one-off distortions.
+- **FCF normalization (sector-adjusted)** — the lookback window is **dynamic**: 7 years for highly cyclical sectors (Energy, Basic Materials) to smooth the business cycle, down to 3 years for asset-light/growth firms (Tech, Consumer Defensive) to prioritise recency (`_fcf_lookback_years`). **CAPEX is smoothed** (mean CapEx/Revenue applied to latest revenue, removing one-off spikes) and **NWC is normalized** (the year's working-capital swing is swapped for the through-cycle mean so a single inventory/receivables move doesn't distort the run-rate). The result is blended 60/40 with reported FCF so one noisy statement can't dominate.
 - **Output** — a base value plus a low/high range from the scenario spread.
 
 ### Comparables (relative value)
@@ -68,24 +68,41 @@ User ──▶ React SPA ──┬──▶ FastAPI  ──▶ yfinance / yahooq
 - Multiples aggregated with a **similarity-weighted harmonic mean** (harmonic mean is the correct average for ratios; weighting tilts toward the closest comparables).
 - Implied price derived from the target's own metric × the peer multiple.
 
-### Blend & verdict
+### Dynamic blend & verdict
+The fixed 60/40 split is replaced by a **Bayesian-inspired dynamic weighting** (`calculate_blend_weights`). A "DCF reliability" prior in [0,1] is built from sector cyclicality, CAPEX intensity, beta, and profitability, then mapped to a DCF weight in **[0.30, 0.80]**:
+
 ```
-final_value = 0.6 · DCF + 0.4 · comps
-upside      = (final_value − price) / price
+w_dcf   ∈ [0.30, 0.80]   (asset-light, predictable, low-beta ⇒ higher)
+w_comps = 1 − w_dcf      (cyclical, capital-intensive, high-beta ⇒ higher)
+final_value = w_dcf · DCF + w_comps · comps
 verdict     = POSITIVE BIAS (upside > 15%) | NEGATIVE BIAS (< −10%) | NEUTRAL
 ```
+
+The chosen weights and FCF lookback window are returned in `valuation_analysis` and shown in the UI.
 
 ### Confidence score
 Combines peer count/quality, DCF validity, data completeness, and event risk into a single 0–100 robustness indicator.
 
 ---
 
-## 4. Peer engine (Category A / B)
+## 4. Peer engine (formalized cascade)
 
-- **Category A** — same sector **and** industry: true direct comparables (shown in cyan).
-- **Category B** — same sector, different industry: scale/size benchmarks (shown in amber).
-- **Discovery sources** — Finviz screener (US, industry-filtered) → yahooquery → yfinance, with promotion of B→A when A is empty (important for thin international coverage).
+Candidate symbols are sourced (Finviz screener for US + yahooquery recommendations), their metadata fetched **once** in a batch, then run through a rigid filter cascade (`get_robust_peers`):
+
+| Filter | Rule |
+|--------|------|
+| 1 | GICS **Sector + Industry** match (always required for Category A) |
+| 2 | **Revenue** within ±30% of target |
+| 3 | **Market cap** within ±50% of target |
+| 4 | **ROIC + EBITDA-margin** proximity (+ log market-cap distance) for ranking |
+
+If the strictest tier yields fewer than 3 names, the size bands are **relaxed one tier at a time** (±50% cap → 0.1–10× cap → size-unconstrained), and the tier actually used is reported back in `peer_methodology.tier_used` and surfaced in the peers-modal UI so reviewers see exactly how the cohort was generated.
+
+- **Category A** — direct comparables (same sector + industry), ranked by combined size/ROIC/margin proximity (shown in cyan).
+- **Category B** — same sector, different industry, sized 0.2–5× (scale benchmarks, shown in amber).
 - **Normalization** — every peer's price and market cap are converted into the target's currency via live FX before multiples are computed.
+
+> Mega-cap outliers (e.g. a $3T company in a thin industry) may legitimately fall through to the size-unconstrained tier — the UI labels this honestly rather than fabricating size-matched peers.
 
 ---
 
@@ -98,7 +115,17 @@ Implemented in `get_smart_news`. Tiers run until enough headlines are collected,
 3. **Yahoo Finance RSS** + **Google News RSS** with a broadened, finance-weighted query.
 4. **Sector / industry macro news** — final fallback; the response is tagged `fallback: "sector"` so the UI can show a "broader sector news" note.
 
-Each headline is scored with **VADER** sentiment, a directional keyword adjustment, a source-credibility weight, a relevance weight, and **time decay** (3-day half-life). Aggregated into short-term (3d), medium-term (30d), and an event-risk flag.
+Each headline is scored by the **NLP engine** (see §6.5), then weighted by source credibility, relevance, and **time decay** (3-day half-life). Aggregated into short-term (3d), medium-term (30d), and an event-risk flag. Titles are batch-scored in a single call to bound latency.
+
+### 6.5 Sentiment engine (FinBERT + fallback)
+
+[`nlp.py`](../backend/nlp.py) provides `batch_sentiment(titles)`:
+
+- **Primary** — `ProsusAI/finbert` via the Hugging Face Inference API (activated when `HF_API_TOKEN` is set). FinBERT is trained on financial text, so it reads jargon and context — e.g. *"margins compressed due to temporary inventory actions"* is not blindly scored negative. Compound score = `P(positive) − P(negative)`.
+- **Fallback** — an enhanced VADER lexicon (finance keyword nudges) used whenever the token is unset, the model is cold-loading (HTTP 503), the request times out, or anything errors.
+- **Bounded** — single batched request per analysis, `HF_TIMEOUT`-second cap, results cached. We deliberately do **not** load transformers/torch locally — that would exceed Render's 512 MB free tier.
+
+The active engine name is returned in `sentiment_analysis.nlp_engine` and shown in the UI.
 
 ---
 
@@ -114,6 +141,19 @@ A multi-source cascade so coverage is shown whenever it exists anywhere:
 The `recommendation_mean` (1.0 = Strong Buy … 5.0 = Strong Sell) drives the SVG gauge in the UI. When nothing is found, `data_available: false` triggers the "Coverage Paused" state.
 
 ---
+
+## 6.6 Model validation / backtesting
+
+[`run_backtest`](../backend/analysis.py) quantifies how well the fair-value estimate tracks reality, returned in `backtest` and rendered as a "Model Validation — Historical Accuracy" card.
+
+**What it computes** (from real trailing-12-month monthly closes):
+- `mape` — mean absolute % distance between the fair value and the realized price path.
+- `consensus_mape` — the same metric for the analyst mean target.
+- `outperformance` — `consensus_mape − mape` (positive ⇒ the model tracked closer than the street).
+- `hit_ratio` — % of months the close fell inside the DCF implied range.
+- `converged`, `actual_return` — directional/contextual color.
+
+**Honest scoping** — this is a **proximity/convergence** validation, *not* a look-ahead-free point-in-time backtest. Free data sources don't expose the historical fundamentals needed to recompute the model at each past date, so we measure how closely the **current** fair value sits to where the stock **actually** traded. The methodology string is shipped alongside the numbers, and the UI states it verbatim — no accuracy figure is hardcoded; everything is computed from live price history.
 
 ## 7. Macro & commodities
 

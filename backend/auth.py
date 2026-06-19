@@ -2,12 +2,16 @@
 """
 Firebase Admin SDK integration.
 Credentials are loaded from (in priority order):
-  1. FIREBASE_SERVICE_ACCOUNT_JSON env var — full JSON string (production / Render)
+  1. FIREBASE_SERVICE_ACCOUNT_JSON env var — raw JSON OR base64-encoded JSON
+     (production / Render). Base64 is recommended: it sidesteps every newline /
+     quote-escaping quirk that hosting providers' env injectors introduce.
   2. FIREBASE_SERVICE_ACCOUNT env var — path to a local .json file (local dev)
 Auth is opt-in per-route; all analysis endpoints remain available without auth.
 """
 import os
 import json
+import base64
+import binascii
 from pathlib import Path
 
 # Load backend/.env for local dev
@@ -23,17 +27,66 @@ _app = None
 _diagnostic: dict = {"status": "pending", "uid_test": None, "firestore": False, "error": None}
 
 
+def _parse_service_account(raw: str):
+    """
+    Parse a Firebase service-account JSON from an environment variable, tolerating
+    the escaping quirks introduced by hosting providers' env-var injectors (Render,
+    Heroku, etc.). Accepts, in order:
+      1. Plain JSON.
+      2. Base64-encoded JSON (recommended for Render — immune to all escaping issues).
+      3. JSON whose `private_key` newlines were mangled (literal newlines or
+         double-escaped `\\n`).
+    Returns a dict or None.
+    """
+    if not raw:
+        return None
+    raw = raw.strip().strip('"').strip("'").strip()
+
+    # Attempt 1: straight JSON
+    try:
+        return _fix_private_key(json.loads(raw))
+    except Exception:
+        pass
+
+    # Attempt 2: base64-encoded JSON
+    try:
+        decoded = base64.b64decode(raw, validate=False).decode("utf-8").strip()
+        if decoded.startswith("{"):
+            return _fix_private_key(json.loads(decoded))
+    except (binascii.Error, UnicodeDecodeError, ValueError, json.JSONDecodeError):
+        pass
+
+    # Attempt 3: real newlines leaked into the JSON body (only legal inside the
+    # private_key string). Escape bare newlines so the document parses, then repair.
+    try:
+        repaired = raw.replace("\r\n", "\n").replace("\n", "\\n")
+        return _fix_private_key(json.loads(repaired))
+    except Exception as e:
+        print(f"[Firebase] Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON: {e}")
+        return None
+
+
+def _fix_private_key(data: dict) -> dict:
+    """Ensure the PEM private_key has real newlines (not literal backslash-n)."""
+    if isinstance(data, dict) and isinstance(data.get("private_key"), str):
+        pk = data["private_key"]
+        if "\\n" in pk and "\n" not in pk:
+            data["private_key"] = pk.replace("\\n", "\n")
+    return data
+
+
 def _load_cred_obj():
     """Return a firebase_admin.credentials.Certificate or None."""
     from firebase_admin import credentials
 
-    # Option 1: full JSON string in env (production)
-    json_str = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip()
-    if json_str:
+    # Option 1: JSON (or base64 JSON) string in env (production)
+    json_str = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "")
+    parsed = _parse_service_account(json_str)
+    if parsed:
         try:
-            return credentials.Certificate(json.loads(json_str))
+            return credentials.Certificate(parsed)
         except Exception as e:
-            print(f"[Firebase] Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON: {e}")
+            print(f"[Firebase] Parsed JSON but Certificate() rejected it: {e}")
 
     # Option 2: path to local file (local dev)
     cred_path = os.environ.get("FIREBASE_SERVICE_ACCOUNT", "").strip()

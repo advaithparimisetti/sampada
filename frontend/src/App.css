@@ -146,6 +146,36 @@ body { margin: 0; background-color: #050505; color: white; font-family: 'Inter',
 .news-headline:hover { color: #00d4ff; }
 .news-fallback-note { color: #ffa500; font-size: 0.72rem; font-style: italic; margin-bottom: 14px; padding: 8px 12px; background: rgba(255,165,0,0.07); border-radius: 8px; border-left: 3px solid #ffa500; }
 
+/* ─── Peers modal polish: crisp, consistent borders ────────────────────────── */
+.peers-header { display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 18px; padding: 18px 20px; background: #0d1622;
+  border: 1px solid #1c3047; border-radius: 12px; }
+.peers-methodology { display: flex; align-items: center; gap: 8px; margin-bottom: 16px;
+  padding: 10px 14px; background: rgba(0,212,255,0.05); border: 1px solid #14304a;
+  border-left: 3px solid #00d4ff; border-radius: 8px; font-size: 0.72rem; color: #8aa; }
+.peers-methodology b { color: #00d4ff; font-weight: 700; }
+.comps-scroll { border: 1px solid #1c3047; border-radius: 12px; padding: 6px 12px; background: #0a121c; }
+/* Distinctly weighted separator under the target (primary) stock */
+.comps-row.target-row td { background: rgba(0,212,255,0.10) !important;
+  border-top: 1px solid rgba(0,212,255,0.35); border-bottom: 2px solid #00d4ff;
+  color: #00d4ff !important; }
+.comps-cat-head td { padding: 8px 10px !important; border-radius: 6px; }
+.calc-footer { border: 1px solid #1c3047; border-radius: 12px; background: #0d1622;
+  padding: 16px 18px; margin-top: 16px; }
+.calc-footer .implied { background: rgba(0,212,255,0.06); border: 1px solid #14304a;
+  border-radius: 10px; padding: 10px 16px; }
+
+/* ─── Model validation / backtest accuracy card ─────────────────────────────── */
+.validation-card { background: #0d1622; border: 1px solid #1c3047; border-radius: 12px;
+  padding: 14px 16px; margin-top: 14px; }
+.validation-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.validation-metric { text-align: center; flex: 1; }
+.validation-metric .v-num { font-family: 'JetBrains Mono', monospace; font-size: 1.25rem; font-weight: 700; }
+.validation-metric .v-lbl { font-size: 0.58rem; color: #667; letter-spacing: 0.06em; margin-top: 2px; text-transform: uppercase; }
+.validation-note { font-size: 0.62rem; color: #556; font-style: italic; margin-top: 10px; line-height: 1.4; }
+.blend-pill { display: inline-flex; gap: 6px; align-items: center; font-size: 0.6rem;
+  color: #889; background: #0a121c; border: 1px solid #1c3047; border-radius: 20px; padding: 3px 10px; margin-top: 8px; }
+
 /* ─── Custom dark scrollbars ────────────────────────────────────────────────── */
 .news-wire::-webkit-scrollbar, .watchlist-grid::-webkit-scrollbar, .comps-scroll::-webkit-scrollbar, .modal-content::-webkit-scrollbar { width: 8px; height: 8px; }
 .news-wire::-webkit-scrollbar-track, .watchlist-grid::-webkit-scrollbar-track, .comps-scroll::-webkit-scrollbar-track, .modal-content::-webkit-scrollbar-track { background: #0a0a0a; border-radius: 4px; }

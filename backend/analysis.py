@@ -14,6 +14,7 @@ from yahooquery import Ticker as YQTicker
 from config import GLOBAL_MACRO, MAJOR_SOURCES
 from utils import normalize_data, get_exchange_rate, format_large_number
 from services import FinvizService
+from nlp import batch_sentiment as nlp_batch_sentiment, engine_name as nlp_engine_name
 
 # ---------------------------------------------------------------------------
 # ANTI-RATE-LIMIT PRIMITIVES
@@ -156,12 +157,73 @@ def calculate_auto_growth(info):
         return 0.10
 
 
-def calculate_normalized_fcf(stock_obj, reported_fcf):
+# ---------------------------------------------------------------------------
+# SECTOR CYCLICALITY  → drives FCF lookback window and DCF/Comps blend
+# ---------------------------------------------------------------------------
+# Higher cyclicality ⇒ longer FCF smoothing window (ride out the business cycle)
+# and heavier reliance on relative valuation (peer multiples).
+_SECTOR_CYCLICALITY = {
+    "Energy": 0.95, "Basic Materials": 0.90, "Industrials": 0.75,
+    "Real Estate": 0.70, "Consumer Cyclical": 0.65, "Financial Services": 0.60,
+    "Communication Services": 0.40, "Healthcare": 0.35, "Technology": 0.30,
+    "Consumer Defensive": 0.25, "Utilities": 0.45,
+}
+
+
+def _sector_cyclicality(sector):
+    return _SECTOR_CYCLICALITY.get(sector, 0.50)
+
+
+def _fcf_lookback_years(sector):
+    """
+    Dynamic FCF normalization window:
+      highly cyclical (Energy/Materials)  → 7 years (smooth the cycle)
+      asset-light / growth (Tech/Defensive) → 3 years (prioritise recency)
+    """
+    c = _sector_cyclicality(sector)
+    if c >= 0.85:
+        return 7
+    if c >= 0.70:
+        return 6
+    if c >= 0.55:
+        return 5
+    if c >= 0.40:
+        return 4
+    return 3
+
+
+def _extract_row(df, keys, col):
+    """Best-effort fetch of df.loc[key][col] for the first matching key."""
+    if df is None or getattr(df, "empty", True):
+        return None
+    for k in keys:
+        if k in df.index and col in df.columns:
+            v = _safe_float(df.loc[k][col])
+            if v is not None:
+                return v
+    return None
+
+
+def calculate_normalized_fcf(stock_obj, reported_fcf, sector=None):
+    """
+    Sector-adjusted normalized free cash flow.
+
+    Methodology:
+      • Lookback window is dynamic (3–7y) per sector cyclicality.
+      • CAPEX is SMOOTHED: we apply the mean CapEx/Revenue ratio across the
+        window to the latest revenue, removing one-off capex spikes/troughs.
+      • NWC is NORMALIZED: the actual year's change in net working capital
+        (already embedded in OCF) is swapped for the through-cycle mean ΔNWC,
+        so a single working-capital swing doesn't distort the run-rate.
+    Returns a normalized FCF level (falls back to reported_fcf on any gap).
+    """
     try:
         financials = stock_obj.financials
         cashflow = stock_obj.cashflow
+        balance = getattr(stock_obj, "balance_sheet", None)
         if financials is None or financials.empty or cashflow is None or cashflow.empty:
             return reported_fcf
+
         rev_history = None
         for key in ['Total Revenue', 'TotalRevenue', 'Operating Revenue']:
             if key in financials.index:
@@ -169,32 +231,102 @@ def calculate_normalized_fcf(stock_obj, reported_fcf):
                 break
         if rev_history is None:
             return reported_fcf
-        common_cols = rev_history.index.intersection(cashflow.columns)
-        margins = []
-        for col in list(common_cols)[:3]:
-            try:
-                ocf = 0
-                for k in ['Operating Cash Flow', 'Total Cash From Operating Activities']:
-                    if k in cashflow.index:
-                        v = _safe_float(cashflow.loc[k][col])
-                        if v is not None:
-                            ocf = v
-                            break
-                capex = 0
-                if 'Capital Expenditure' in cashflow.index:
-                    capex = _safe_float(cashflow.loc['Capital Expenditure'][col]) or 0
-                fcf = ocf + capex if capex < 0 else ocf - capex
-                rev = _safe_float(rev_history[col])
-                if rev and rev > 0:
-                    margins.append(fcf / rev)
-            except Exception:
-                pass
-        if not margins:
+
+        lookback = _fcf_lookback_years(sector)
+        common_cols = list(rev_history.index.intersection(cashflow.columns))[:lookback]
+        if not common_cols:
             return reported_fcf
-        normalized = rev_history.iloc[0] * (sum(margins) / len(margins))
-        return max(reported_fcf, normalized) if normalized > 0 else reported_fcf
+
+        ocf_margins, capex_ratios, nwc_changes = [], [], []
+        prev_nwc = None
+        for col in common_cols:
+            rev = _safe_float(rev_history[col])
+            if not rev or rev <= 0:
+                continue
+            ocf = _extract_row(cashflow, ['Operating Cash Flow', 'Total Cash From Operating Activities'], col)
+            if ocf is None:
+                continue
+            ocf_margins.append(ocf / rev)
+
+            capex = _extract_row(cashflow, ['Capital Expenditure', 'CapitalExpenditures'], col)
+            if capex is not None:
+                capex_ratios.append(abs(capex) / rev)
+
+            # Net working capital = current assets − current liabilities
+            ca = _extract_row(balance, ['Current Assets', 'Total Current Assets'], col)
+            cl = _extract_row(balance, ['Current Liabilities', 'Total Current Liabilities'], col)
+            if ca is not None and cl is not None:
+                nwc = ca - cl
+                if prev_nwc is not None:
+                    nwc_changes.append((nwc - prev_nwc) / rev)
+                prev_nwc = nwc
+
+        if not ocf_margins:
+            return reported_fcf
+
+        latest_rev = _safe_float(rev_history.iloc[0]) or 0
+        mean_ocf_margin = sum(ocf_margins) / len(ocf_margins)
+        mean_capex_ratio = (sum(capex_ratios) / len(capex_ratios)) if capex_ratios else 0.0
+
+        # Smoothed FCF margin = through-cycle OCF margin − smoothed CapEx intensity
+        normalized_margin = mean_ocf_margin - mean_capex_ratio
+
+        # NWC normalization: nudge toward the through-cycle mean ΔNWC drag.
+        if nwc_changes:
+            mean_nwc_drag = sum(nwc_changes) / len(nwc_changes)
+            # A persistent build in NWC (positive ΔNWC) is a cash drag.
+            normalized_margin -= max(0.0, mean_nwc_drag) * 0.5
+
+        normalized = latest_rev * normalized_margin
+        if normalized <= 0:
+            return reported_fcf
+        # Blend reported & normalized so a single noisy statement can't dominate.
+        return reported_fcf * 0.4 + normalized * 0.6 if reported_fcf > 0 else normalized
     except Exception:
         return reported_fcf
+
+
+def calculate_blend_weights(info, sector):
+    """
+    Bayesian-inspired DCF/Comps blend. Returns (w_dcf, w_comps) summing to 1.
+
+    Intuition: DCF is most trustworthy for predictable, asset-light businesses;
+    relative valuation is more reliable for cyclical / capital-intensive firms
+    where forward cash flows are hard to forecast but peer multiples are dense.
+
+    A 'DCF reliability' prior in [0,1] is built from:
+      • sector cyclicality (lower ⇒ more DCF)
+      • capex intensity     (lower ⇒ more DCF)
+      • beta / volatility   (lower ⇒ more DCF)
+      • profitability       (positive, stable margins ⇒ more DCF)
+    Mapped to a DCF weight in [0.30, 0.80].
+    """
+    try:
+        cyc = _sector_cyclicality(sector)
+        reliability = 1.0 - cyc  # asset-light sectors start high
+
+        revenue = _safe_float(info.get('totalRevenue'), 0) or 0
+        capex = abs(_safe_float(info.get('capitalExpenditures'), 0) or 0)
+        capex_intensity = (capex / revenue) if revenue > 0 else 0.10
+        # capex intensity 0 → +0.15, 0.20+ → −0.15
+        reliability += max(-0.15, min(0.15, (0.10 - capex_intensity) * 1.5))
+
+        beta = _safe_float(info.get('beta'), 1.0) or 1.0
+        # beta 0.5 → +0.10, beta 2.0 → −0.20
+        reliability += max(-0.20, min(0.10, (1.0 - beta) * 0.20))
+
+        margin = _safe_float(info.get('profitMargins'), 0) or 0
+        if margin >= 0.15:
+            reliability += 0.10
+        elif margin <= 0:
+            reliability -= 0.15
+
+        reliability = max(0.0, min(1.0, reliability))
+        w_dcf = round(0.30 + reliability * 0.50, 2)   # ∈ [0.30, 0.80]
+        w_dcf = max(0.30, min(0.80, w_dcf))
+        return w_dcf, round(1.0 - w_dcf, 2)
+    except Exception:
+        return 0.60, 0.40
 
 
 def run_institutional_dcf(ticker, info, stock_obj, sector_benchmark_pe=20):
@@ -216,7 +348,7 @@ def run_institutional_dcf(ticker, info, stock_obj, sector_benchmark_pe=20):
             p = price or 0
             return {"val": p, "low": p * 0.9, "high": p * 1.1, "wacc": 0.1, "growth": 0.05}, "Insufficient Data"
 
-        fcf_start = calculate_normalized_fcf(stock_obj, latest_fcf)
+        fcf_start = calculate_normalized_fcf(stock_obj, latest_fcf, sector=info.get('sector'))
         wacc_base, wacc_stress = calculate_wacc_institutional(info, stock_obj.financials, stock_obj.balance_sheet)
         growth_explicit = calculate_auto_growth(info)
         growth_terminal = 0.025
@@ -267,6 +399,7 @@ def run_institutional_dcf(ticker, info, stock_obj, sector_benchmark_pe=20):
             "wacc": round(wacc_base * 100, 1),
             "growth": round(growth_explicit * 100, 1),
             "fcf_start": fcf_start,
+            "fcf_lookback": _fcf_lookback_years(info.get('sector')),
         }, "Institutional DCF"
     except Exception as e:
         print(f"[DCF] error: {e}")
@@ -311,13 +444,22 @@ def is_relevant_news(title):
     return any(k in title.lower() for k in HIGH_IMPACT_KEYWORDS)
 
 
-def analyze_headline_institutional(headline):
+def analyze_headline_institutional(headline, sentiment=None):
+    """
+    Score a single headline.
+    `sentiment` — optional precomputed compound score in [-1,1] from the FinBERT
+    batch engine. When supplied we trust the contextual model and skip the VADER
+    keyword heuristic (which would otherwise mis-read nuanced financial phrasing).
+    """
     title = headline.get('title', '')
     source = headline.get('publisher', 'Other')
     pub_time = parse_news_date(headline.get('providerPublishTime', datetime.now()))
-    analyzer = SentimentIntensityAnalyzer()
-    vader_score = analyzer.polarity_scores(title)['compound']
-    combined_raw = max(min(vader_score + directional_adjustment(title), 1.0), -1.0)
+    if sentiment is not None:
+        combined_raw = max(min(float(sentiment), 1.0), -1.0)
+    else:
+        analyzer = SentimentIntensityAnalyzer()
+        vader_score = analyzer.polarity_scores(title)['compound']
+        combined_raw = max(min(vader_score + directional_adjustment(title), 1.0), -1.0)
     source_w = SOURCE_WEIGHTS.get(source, 0.4)
     relevance_w = 1.2 if is_relevant_news(title) else 0.6
     final_score = combined_raw * source_w * relevance_w * calculate_time_decay(pub_time)
@@ -504,7 +646,9 @@ def get_smart_news(ticker, info=None, is_us=False):
         except Exception:
             pass
 
-    processed, seen = [], set()
+    # Dedupe first, then batch-score titles through the FinBERT engine in ONE
+    # call (falls back to VADER internally) to keep latency bounded.
+    unique, seen = [], set()
     for h in raw_headlines:
         if not h or not h.get('title'):
             continue
@@ -512,12 +656,22 @@ def get_smart_news(ticker, info=None, is_us=False):
         if key in seen:
             continue
         seen.add(key)
-        processed.append(analyze_headline_institutional(h))
+        unique.append(h)
+
+    try:
+        sentiment_map = nlp_batch_sentiment([h.get('title', '') for h in unique])
+    except Exception:
+        sentiment_map = {}
+
+    processed = [
+        analyze_headline_institutional(h, sentiment=sentiment_map.get(h.get('title', '')))
+        for h in unique
+    ]
 
     if not processed:
         return {
             "score": 50, "short_term": 50, "medium_term": 50,
-            "event_risk": "Low", "fallback": "none",
+            "event_risk": "Low", "fallback": "none", "nlp_engine": nlp_engine_name(),
         }, []
 
     processed.sort(key=lambda x: x['timestamp'], reverse=True)
@@ -536,6 +690,7 @@ def get_smart_news(ticker, info=None, is_us=False):
         "medium_term": norm(med_score),
         "event_risk": event_risk,
         "fallback": "sector" if sector_fallback_used else "direct",
+        "nlp_engine": nlp_engine_name(),
     }, processed[:8]
 
 
@@ -628,21 +783,28 @@ def process_peer_data(ticker, target_currency, target_profile=None, category="A"
         return None
 
 
-def get_robust_peers(symbol, target_sector, target_industry, target_mkt_cap, is_us=False):
+def get_robust_peers(symbol, target_sector, target_industry, target_mkt_cap,
+                     is_us=False, target_revenue=None, target_roic=None, target_margin=None):
     """
-    Returns a dict with two peer buckets:
-      'cat_a': Direct comparables — same sector AND same industry
-      'cat_b': Scale benchmarks   — same sector, different industry, similar market cap
+    Formalized, cascading peer selection.
 
-    Strategy:
-      1. Finviz screener (US only, industry-filtered)
-      2. yahooquery recommendations
-      3. Batch fetch → strict sector filter → split by industry match
+    Category A (Direct comparables) is built by a rigid filter cascade:
+        Filter 1  Sector AND Industry match               (always required)
+        Filter 2  Revenue band   — within ±30% of target
+        Filter 3  Market-cap band — within ±50% of target
+        Filter 4  ROIC & EBITDA-margin similarity         (used for ranking)
+    If the strictest tier yields < 3 names, the bands are RELAXED one tier at a
+    time (documented), so thin-coverage / international names still get a cohort.
+
+    Category B (Scale benchmarks) = same sector, different industry, sized 0.2x–5x.
+
+    Returns {"cat_a": [...], "cat_b": [...], "methodology": {...}} where the
+    methodology dict is surfaced in the UI so reviewers can see exactly how the
+    cohort was generated.
     """
-    exchange_suffix = ("." + symbol.split(".")[-1]) if "." in symbol else ""
     raw_candidates: list[str] = []
 
-    # Source 1: Finviz (US stocks, industry-level)
+    # Source 1: Finviz screener (US, sector+industry filtered)
     if is_us:
         try:
             fv = FinvizService.get_peers(target_sector, target_industry, str(target_mkt_cap)) or []
@@ -650,7 +812,7 @@ def get_robust_peers(symbol, target_sector, target_industry, target_mkt_cap, is_
         except Exception:
             pass
 
-    # Source 2: yahooquery recommendations (works for international)
+    # Source 2: yahooquery recommendations (works internationally)
     try:
         t = YQTicker(symbol)
         recs = _with_retry(lambda: t.recommendations, retries=2)
@@ -660,20 +822,6 @@ def get_robust_peers(symbol, target_sector, target_industry, target_mkt_cap, is_
     except Exception:
         pass
 
-    # Source 3: yfinance similar securities lookup (for international tickers)
-    if not is_us and len(raw_candidates) < 5:
-        try:
-            # Try fetching recommendations from yfinance (newer versions expose this)
-            yf_stock = yf.Ticker(symbol)
-            yf_recs = getattr(yf_stock, 'recommendations', None)
-            if yf_recs is not None and not yf_recs.empty:
-                # Collect any related tickers surfaced
-                if 'To Grade' in yf_recs.columns:
-                    pass  # This is analyst grades, not peer symbols
-        except Exception:
-            pass
-
-    # Deduplicate; remove self
     seen = set()
     deduped = []
     for c in raw_candidates:
@@ -681,58 +829,110 @@ def get_robust_peers(symbol, target_sector, target_industry, target_mkt_cap, is_
             seen.add(c)
             deduped.append(c)
 
+    methodology = {
+        "filters": [
+            "GICS Sector & Industry match",
+            "Revenue band ±30% of target",
+            "Market cap ±50% of target",
+            "ROIC & margin similarity (ranking)",
+        ],
+        "tier_used": "none",
+        "candidates_screened": len(deduped),
+        "note": "Category A = direct comparables; Category B = same-sector scale benchmarks.",
+    }
+
     if not deduped:
-        return {"cat_a": [], "cat_b": []}
+        return {"cat_a": [], "cat_b": [], "methodology": methodology}
 
-    cat_a: list[str] = []  # same sector + same industry
-    cat_b: list[str] = []  # same sector, different industry
-
+    # ── Fetch candidate metadata once ─────────────────────────────────────────
     batch = deduped[:20]
+    metas = []
     try:
         objs = _with_retry(lambda: yf.Tickers(" ".join(batch)), retries=2)
         if objs is None:
-            # Fallback: return first N as cat_a without filtering
-            return {"cat_a": deduped[:6], "cat_b": []}
-
+            methodology["tier_used"] = "unfiltered (metadata unavailable)"
+            return {"cat_a": deduped[:6], "cat_b": [], "methodology": methodology}
         for p in batch:
             try:
-                p_inf = objs.tickers[p].info or {}
-                if not p_inf:
+                pi = objs.tickers[p].info or {}
+                if not pi:
                     continue
-                p_sector = p_inf.get('sector')
-                p_industry = p_inf.get('industry')
-                p_cap = _safe_float(p_inf.get('marketCap'), 0) or 0
-
-                # Hard filter: sector must match
-                if p_sector != target_sector:
-                    continue
-
-                # Soft market-cap filter — Category A: 0.1x – 10x, Category B: 0.2x – 5x
-                if target_mkt_cap and p_cap:
-                    if p_cap < target_mkt_cap * 0.1 or p_cap > target_mkt_cap * 10:
-                        continue
-
-                if p_industry == target_industry:
-                    # Category A: Direct comparables
-                    cat_a.append(p)
-                else:
-                    # Category B: Scale benchmarks (tighter cap band)
-                    if not (target_mkt_cap and p_cap) or (
-                        p_cap >= target_mkt_cap * 0.2 and p_cap <= target_mkt_cap * 5
-                    ):
-                        cat_b.append(p)
+                metas.append({
+                    "symbol": p,
+                    "sector": pi.get('sector'),
+                    "industry": pi.get('industry'),
+                    "mkt_cap": _safe_float(pi.get('marketCap'), 0) or 0,
+                    "revenue": _safe_float(pi.get('totalRevenue'), 0) or 0,
+                    "roic": _safe_float(pi.get('returnOnEquity'), 0),
+                    "margin": _safe_float(pi.get('ebitdaMargins'), 0),
+                })
             except Exception:
                 pass
     except Exception:
-        # Total batch fetch failure: classify all as cat_a
-        return {"cat_a": deduped[:6], "cat_b": []}
+        methodology["tier_used"] = "unfiltered (batch fetch failed)"
+        return {"cat_a": deduped[:6], "cat_b": [], "methodology": methodology}
 
-    # If Cat A is empty (rare industry), promote some Cat B as Cat A
+    same_sector = [m for m in metas if m["sector"] == target_sector]
+    same_industry = [m for m in same_sector if m["industry"] == target_industry]
+
+    def _within(value, target, pct):
+        if not target or not value:
+            return True  # can't test → don't exclude
+        return target * (1 - pct) <= value <= target * (1 + pct)
+
+    # ── Category A cascade with documented relaxation ─────────────────────────
+    tiers = [
+        ("Sector+Industry, Revenue ±30%, MktCap ±50%",
+         lambda m: _within(m["revenue"], target_revenue, 0.30) and _within(m["mkt_cap"], target_mkt_cap, 0.50)),
+        ("Sector+Industry, MktCap ±50%",
+         lambda m: _within(m["mkt_cap"], target_mkt_cap, 0.50)),
+        ("Sector+Industry, MktCap 0.1x–10x",
+         lambda m: (not target_mkt_cap or not m["mkt_cap"] or target_mkt_cap * 0.1 <= m["mkt_cap"] <= target_mkt_cap * 10)),
+        ("Sector+Industry (size unconstrained)", lambda m: True),
+    ]
+
+    cat_a_metas = []
+    for label, pred in tiers:
+        cat_a_metas = [m for m in same_industry if pred(m)]
+        if len(cat_a_metas) >= 3:
+            methodology["tier_used"] = label
+            break
+    else:
+        # loop didn't break — use whatever the loosest tier produced
+        methodology["tier_used"] = tiers[-1][0] if same_industry else "Sector-only (no industry match)"
+
+    # Rank Category A by combined size + ROIC + margin proximity to the target,
+    # so that even when the hard size band is relaxed the closest-by-scale names
+    # surface first (prevents a mega-cap being matched to micro-caps).
+    def _similarity_key(m):
+        score = 0.0
+        if target_mkt_cap and m["mkt_cap"] and target_mkt_cap > 0 and m["mkt_cap"] > 0:
+            score += abs(math.log10(m["mkt_cap"]) - math.log10(target_mkt_cap)) * 2.0
+        if target_roic is not None and m["roic"] is not None:
+            score += abs(target_roic - m["roic"])
+        if target_margin is not None and m["margin"] is not None:
+            score += abs(target_margin - m["margin"])
+        return score
+    cat_a_metas.sort(key=_similarity_key)
+    cat_a = [m["symbol"] for m in cat_a_metas]
+
+    # ── Category B: same sector, different industry, sized 0.2x–5x ────────────
+    cat_b = []
+    for m in same_sector:
+        if m["industry"] == target_industry:
+            continue
+        if not target_mkt_cap or not m["mkt_cap"] or (target_mkt_cap * 0.2 <= m["mkt_cap"] <= target_mkt_cap * 5):
+            cat_b.append(m["symbol"])
+
+    # If no direct industry match exists, promote sized sector peers into A
     if not cat_a and cat_b:
+        methodology["tier_used"] = "Sector-only fallback (no industry match found)"
         cat_a = cat_b[:4]
         cat_b = cat_b[4:]
 
-    return {"cat_a": cat_a[:8], "cat_b": cat_b[:6]}
+    methodology["cat_a_count"] = len(cat_a[:8])
+    methodology["cat_b_count"] = len(cat_b[:6])
+    return {"cat_a": cat_a[:8], "cat_b": cat_b[:6], "methodology": methodology}
 
 
 def calculate_weighted_harmonic_mean(vals, weights):
@@ -1095,6 +1295,78 @@ def get_analyst_consensus(ticker, info, is_us=False):
             pass
 
     return consensus
+
+
+# ---------------------------------------------------------------------------
+# MODEL VALIDATION / BACKTESTING
+# ---------------------------------------------------------------------------
+
+def run_backtest(stock_obj, fair_value, current_price, dcf_low=None, dcf_high=None,
+                 consensus_target=None):
+    """
+    Historical validation of the fair-value estimate against the realized
+    trailing-12-month price path.
+
+    METHODOLOGY (read this before trusting the numbers):
+      This is a *proximity / convergence* validation, not a look-ahead-free
+      point-in-time backtest. Free data sources do not expose the historical
+      fundamentals needed to recompute the model at each past date, so instead
+      we measure how closely the CURRENT fair value tracks where the stock has
+      ACTUALLY traded over the last 12 months:
+
+        MAPE = mean( |fair_value − price_t| / price_t )  over monthly closes
+        Hit-ratio = % of months the close fell inside the DCF implied range
+        Outperformance = consensus_MAPE − model_MAPE   (positive ⇒ model closer)
+
+      All numbers are computed from real price history — nothing is hardcoded.
+      Returns {"data_available": False} when there isn't enough history.
+    """
+    result = {"data_available": False, "methodology":
+              "Proximity of fair value to realized 12-month monthly close path "
+              "(not a point-in-time backtest; free data lacks historical fundamentals)."}
+    try:
+        if not fair_value or fair_value <= 0:
+            return result
+        hist = _with_retry(lambda: stock_obj.history(period="13mo", interval="1mo"), retries=2)
+        if hist is None or hist.empty or 'Close' not in hist.columns:
+            return result
+        closes = [c for c in hist['Close'].tolist() if c and c > 0]
+        if len(closes) < 6:
+            return result
+
+        n = len(closes)
+        mape = sum(abs(fair_value - p) / p for p in closes) / n * 100
+
+        cons_mape = None
+        if consensus_target and consensus_target > 0:
+            cons_mape = sum(abs(consensus_target - p) / p for p in closes) / n * 100
+
+        # Hit ratio against the DCF implied range
+        hit_ratio = None
+        if dcf_low and dcf_high and dcf_high > dcf_low:
+            hits = sum(1 for p in closes if dcf_low <= p <= dcf_high)
+            hit_ratio = round(hits / n * 100, 1)
+
+        # Directional convergence: did price end the year closer to fair value?
+        start_gap = abs(fair_value - closes[0]) / closes[0]
+        end_gap = abs(fair_value - closes[-1]) / closes[-1]
+        converged = end_gap < start_gap
+
+        actual_return = round((closes[-1] - closes[0]) / closes[0] * 100, 1)
+
+        result.update({
+            "data_available": True,
+            "window_months": int(n),
+            "mape": round(float(mape), 1),
+            "consensus_mape": round(float(cons_mape), 1) if cons_mape is not None else None,
+            "outperformance": round(float(cons_mape - mape), 1) if cons_mape is not None else None,
+            "hit_ratio": round(float(hit_ratio), 1) if hit_ratio is not None else None,
+            "converged": bool(converged),
+            "actual_return": round(float(actual_return), 1),
+        })
+    except Exception as e:
+        print(f"[backtest] {e}")
+    return result
 
 
 def calculate_quality_scores(info, financials):
