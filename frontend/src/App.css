@@ -181,3 +181,79 @@ body { margin: 0; background-color: #050505; color: white; font-family: 'Inter',
 .news-wire::-webkit-scrollbar-track, .watchlist-grid::-webkit-scrollbar-track, .comps-scroll::-webkit-scrollbar-track, .modal-content::-webkit-scrollbar-track { background: #0a0a0a; border-radius: 4px; }
 .news-wire::-webkit-scrollbar-thumb, .watchlist-grid::-webkit-scrollbar-thumb, .comps-scroll::-webkit-scrollbar-thumb, .modal-content::-webkit-scrollbar-thumb { background: #1f3447; border-radius: 4px; }
 .news-wire::-webkit-scrollbar-thumb:hover, .watchlist-grid::-webkit-scrollbar-thumb:hover, .comps-scroll::-webkit-scrollbar-thumb:hover, .modal-content::-webkit-scrollbar-thumb:hover { background: #00d4ff66; }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   RESPONSIVE  —  tablet & phone adaptation
+   The base layout is fixed-desktop (absolute header, 3-col grid, locked body).
+   Below 1024px the page becomes a normal vertically-scrolling document with a
+   sticky header and a collapsing grid.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/* ── Tablet and below: page scrolls, header sticky, grid → 2 columns ── */
+@media (max-width: 1024px) {
+  html, body { overflow-x: hidden; overflow-y: auto; height: auto; min-height: 100vh; }
+
+  .search-container.search-top {
+    position: sticky; top: 0; left: auto; transform: none;
+    flex-wrap: wrap; gap: 10px 14px; padding: 12px 18px; row-gap: 10px;
+  }
+  .search-top .switch-group { margin-left: 0 !important; margin-right: auto !important; }
+
+  .dashboard {
+    grid-template-columns: 1fr 1fr;
+    height: auto; min-height: 0; margin-top: 18px; width: 94%;
+    padding-bottom: 80px; overflow-y: visible;
+  }
+  .col-span-2, .col-span-3 { grid-column: 1 / -1; }
+
+  .modal-content { width: 94vw; padding: 26px; }
+  .peer-popup { width: 88vw; }
+  .input-wrapper { width: 360px; max-width: 100%; }
+}
+
+/* ── Phone: single column, stacked header, condensed type ── */
+@media (max-width: 680px) {
+  .search-container.search-top { flex-direction: column; align-items: stretch; padding: 12px 14px; }
+  .search-top > div { width: 100%; }
+  .search-top > div:first-child { justify-content: space-between; }
+  .search-top .switch-group { margin: 0 !important; justify-content: center; flex-wrap: wrap; }
+  .search-top .switch-mode { flex: 1; justify-content: center; }
+  /* search input grows to fill the row; export button keeps its size beside it */
+  .search-top .input-wrapper { flex: 1; width: auto !important; min-width: 0; }
+  .btn-ppt { white-space: nowrap; flex-shrink: 0; }
+
+  .search-center h1 { font-size: 2.7rem; margin-bottom: 26px; }
+  .search-center .input-wrapper { width: 88vw; max-width: 460px; }
+
+  .dashboard {
+    grid-template-columns: 1fr; gap: 14px;
+    margin-top: 12px; width: 100%; padding: 0 12px 76px;
+  }
+  .card { padding: 20px; border-radius: 16px; }
+  .card-label { top: 16px; left: 18px; }
+  .card h1 { font-size: 2.4rem !important; }
+
+  .modal-overlay { padding: 8px; align-items: flex-start; }
+  .modal-content { width: 97vw; padding: 18px; max-height: 92vh; margin-top: 6px; }
+  .info-modal { width: 90vw; }
+
+  /* Peers modal: header + footer stack instead of overflowing */
+  .peers-header { flex-direction: column; align-items: stretch; gap: 12px; }
+  .peers-header > div:last-child { width: 100% !important; }
+  .calc-footer { flex-wrap: wrap; gap: 12px; }
+  .calc-footer .metric { flex: 1 1 40%; }
+  .calc-footer .implied { flex: 1 1 100%; min-width: 0; text-align: center; }
+
+  .validation-row { flex-wrap: wrap; }
+  .validation-metric { flex: 1 1 45%; }
+
+  .footer-bar { font-size: 0.55rem; padding: 8px 10px; letter-spacing: 0.5px; }
+  .ticker-chip { max-width: 100%; }
+}
+
+/* ── Small phone: trim the largest type further ── */
+@media (max-width: 400px) {
+  .search-center h1 { font-size: 2.2rem; }
+  .card h1 { font-size: 2rem !important; }
+  .brand-title { font-size: 1.3rem; }
+}

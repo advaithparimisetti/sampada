@@ -880,11 +880,11 @@ function App() {
                         return (
                           <>
                             {catA.length > 0 && (
-                              <tr className="comps-cat-head"><td colSpan="11" style={{ background: '#001a2e', color: '#00d4ff', fontSize: '0.68rem', fontWeight: 'bold', letterSpacing: '0.08em' }}>▸ CATEGORY A — DIRECT SECTOR & INDUSTRY COMPARABLES</td></tr>
+                              <tr className="comps-cat-head"><td colSpan={dealType === 'LBO' ? 11 : 10} style={{ background: '#001a2e', color: '#00d4ff', fontSize: '0.68rem', fontWeight: 'bold', letterSpacing: '0.08em' }}>▸ CATEGORY A — DIRECT SECTOR & INDUSTRY COMPARABLES</td></tr>
                             )}
                             {catA.map((p, i) => renderPeerRow(p, i))}
                             {catB.length > 0 && (
-                              <tr className="comps-cat-head"><td colSpan="11" style={{ background: '#1a1400', color: '#ffa500', fontSize: '0.68rem', fontWeight: 'bold', letterSpacing: '0.08em' }}>▸ CATEGORY B — SCALE BENCHMARKS (SAME SECTOR)</td></tr>
+                              <tr className="comps-cat-head"><td colSpan={dealType === 'LBO' ? 11 : 10} style={{ background: '#1a1400', color: '#ffa500', fontSize: '0.68rem', fontWeight: 'bold', letterSpacing: '0.08em' }}>▸ CATEGORY B — SCALE BENCHMARKS (SAME SECTOR)</td></tr>
                             )}
                             {catB.map((p, i) => renderPeerRow(p, i + catA.length))}
                           </>

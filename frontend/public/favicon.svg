@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe28a"/>
+      <stop offset="0.5" stop-color="#f5c542"/>
+      <stop offset="1" stop-color="#c8901f"/>
+    </linearGradient>
+    <linearGradient id="goldEdge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e7b53a"/>
+      <stop offset="1" stop-color="#a9760f"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#0b1521"/>
+  <!-- back coin -->
+  <g transform="translate(22 16)">
+    <ellipse cx="11" cy="9" rx="13" ry="7.5" fill="url(#goldEdge)"/>
+    <ellipse cx="11" cy="7.5" rx="13" ry="7.5" fill="url(#gold)" stroke="#a9760f" stroke-width="1"/>
+  </g>
+  <!-- coin stack (3 coins) -->
+  <g transform="translate(14 26)">
+    <ellipse cx="18" cy="22" rx="17" ry="9.5" fill="url(#goldEdge)"/>
+    <ellipse cx="18" cy="19.5" rx="17" ry="9.5" fill="url(#gold)" stroke="#a9760f" stroke-width="1.2"/>
+    <ellipse cx="18" cy="12" rx="17" ry="9.5" fill="url(#goldEdge)"/>
+    <ellipse cx="18" cy="9.5" rx="17" ry="9.5" fill="url(#gold)" stroke="#a9760f" stroke-width="1.2"/>
+    <!-- currency mark on top coin -->
+    <text x="18" y="14.5" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif"
+          font-size="13" font-weight="bold" fill="#9a6a10">₹</text>
+  </g>
+  <!-- shine -->
+  <ellipse cx="24" cy="33" rx="4" ry="2" fill="#fff4cf" opacity="0.55"/>
+</svg>
